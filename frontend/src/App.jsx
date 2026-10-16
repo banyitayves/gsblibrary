@@ -10,6 +10,7 @@ import {
   ChevronRight,
   CircleHelp,
   Clock3,
+  ClipboardCheck,
   Download,
   FileBarChart,
   LayoutDashboard,
@@ -23,6 +24,7 @@ import {
   UsersRound,
   X,
   Sun,
+  TrendingUp,
 } from 'lucide-react'
 import { api } from './api.js'
 
@@ -39,6 +41,7 @@ const navigation = [
   { id: 'Catalog', label: 'Book collection', icon: LibraryBig },
   { id: 'Members', label: 'Students & teachers', icon: UsersRound },
   { id: 'Loans', label: 'Loans & returns', icon: Bookmark },
+  { id: 'Attendance', label: 'Library attendance', icon: ClipboardCheck },
   { id: 'Reports', label: 'Reports', icon: FileBarChart },
 ]
 
@@ -106,6 +109,10 @@ function App() {
   const [books, setBooks] = useState([])
   const [members, setMembers] = useState([])
   const [loans, setLoans] = useState([])
+  const [visits, setVisits] = useState([])
+  const [visitSummary, setVisitSummary] = useState(null)
+  const [visitDate, setVisitDate] = useState(today())
+  const [visitForm, setVisitForm] = useState({ memberId: '', bookId: '' })
   const [activity, setActivity] = useState([])
   const [search, setSearch] = useState('')
   const [memberTypeFilter, setMemberTypeFilter] = useState('All')
@@ -157,11 +164,30 @@ function App() {
     }
   }, [notify])
 
+  const loadAttendance = useCallback(async (date = visitDate) => {
+    try {
+      const [dailyVisits, summary] = await Promise.all([
+        api(`/library-visits?date=${encodeURIComponent(date)}`),
+        api(`/library-visits/summary?days=30&date=${encodeURIComponent(today())}`),
+      ])
+      setVisits(dailyVisits)
+      setVisitSummary(summary)
+    } catch (error) {
+      notify(error.message)
+    }
+  }, [notify, visitDate])
+
   useEffect(() => {
     if (!user) return undefined
     const timer = window.setTimeout(() => { void loadData() }, 0)
     return () => window.clearTimeout(timer)
   }, [loadData, user])
+
+  useEffect(() => {
+    if (!user || page !== 'Attendance') return undefined
+    const timer = window.setTimeout(() => { void loadAttendance(visitDate) }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadAttendance, page, user, visitDate])
 
   useEffect(() => {
     document.documentElement.dataset.theme = darkMode ? 'dark' : 'light'
@@ -290,6 +316,32 @@ function App() {
       await api(`/loans/${loan.id}/return`, { method: 'POST' })
       notify(`“${loan.bookTitle}” has been returned.`)
       await loadData()
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function recordVisit(event) {
+    event.preventDefault()
+    if (!visitForm.memberId) {
+      notify('Choose the student or teacher who entered the library.')
+      return
+    }
+    setBusy(true)
+    try {
+      await api('/library-visits', {
+        method: 'POST',
+        body: JSON.stringify({
+          memberId: Number(visitForm.memberId),
+          bookId: visitForm.bookId ? Number(visitForm.bookId) : null,
+          visitDate,
+        }),
+      })
+      setVisitForm({ memberId: '', bookId: '' })
+      notify('Library attendance recorded.')
+      await loadAttendance(visitDate)
     } catch (error) {
       notify(error.message)
     } finally {
@@ -626,6 +678,21 @@ function App() {
               busy={busy}
             />
           )}
+          {page === 'Attendance' && (
+            <LibraryAttendance
+              members={members}
+              books={books}
+              visits={visits}
+              summary={visitSummary}
+              date={visitDate}
+              setDate={setVisitDate}
+              form={visitForm}
+              setForm={setVisitForm}
+              busy={busy}
+              onRecord={recordVisit}
+              onExport={() => downloadCsv(`/export/library-visits.csv?date=${encodeURIComponent(visitDate)}`, `gs-busanza-library-attendance-${visitDate}.csv`)}
+            />
+          )}
           {page === 'Reports' && (
             <Reports
               filters={reportFilters}
@@ -791,8 +858,8 @@ function PageHeading({ eyebrow, title, description, children }) {
   )
 }
 
-function ActionButton({ children, onClick, secondary = false, icon: Icon = Plus }) {
-  return <button onClick={onClick} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[11px] font-bold transition ${secondary ? 'border border-[#e5eae3] bg-white text-[#536258] hover:bg-[#f7f8f5]' : 'bg-[#315c46] text-white hover:bg-[#284a39]'}`}><Icon size={14} />{children}</button>
+function ActionButton({ children, onClick, secondary = false, icon: Icon = Plus, type = 'button', disabled = false }) {
+  return <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[11px] font-bold transition disabled:cursor-wait disabled:opacity-60 ${secondary ? 'border border-[#e5eae3] bg-white text-[#536258] hover:bg-[#f7f8f5]' : 'bg-[#315c46] text-white hover:bg-[#284a39]'}`}><Icon size={14} />{children}</button>
 }
 
 function Dashboard({ dashboard, books, loans, activity, onNavigate, onIssue }) {
@@ -1039,6 +1106,81 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
         {kind === 'popular' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Most-borrowed books</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length.toLocaleString()} titles sorted by total checkouts</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Category / shelf</th><th className="px-4 py-3">Total loans</th><th className="px-5 py-3">Unique borrowers</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author}</p></td><td className="px-4 py-3">{book.isbn}</td><td className="px-4 py-3">{book.category} · {book.shelf}</td><td className="px-4 py-3">{book.totalLoans}</td><td className="px-5 py-3">{book.uniqueBorrowers}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No borrowing records match these filters." />}</tbody></table></div></section>}
         {kind === 'availability' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Books available in the library</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length.toLocaleString()} books{filters.availability !== 'All' ? ` · ${filters.availability}` : ''}</p></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Category / shelf</th><th className="px-4 py-3">Available / total</th><th className="px-5 py-3">Availability</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author}</p></td><td className="px-4 py-3">{book.isbn}</td><td className="px-4 py-3">{book.category} · {book.shelf}</td><td className="px-4 py-3">{book.availableCopies} / {book.totalCopies}</td><td className="px-5 py-3">{book.availability}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No books match this availability filter." />}</tbody></table></div></section>}
       </>}
+    </>
+  )
+}
+
+function LibraryAttendance({ members, books, visits, summary, date, setDate, form, setForm, busy, onRecord, onExport }) {
+  const activeMembers = members.filter((member) => member.status === 'Active')
+  return (
+    <>
+      <PageHeading eyebrow="Record each library visit" title="Library attendance" description="Check in students and teachers, note what they are reading, and see your most frequent visitors.">
+        <ActionButton secondary icon={Download} onClick={onExport}>Download attendance CSV</ActionButton>
+      </PageHeading>
+      <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          ['Visits today', summary?.visitsToday ?? '—'],
+          ['Different visitors today', summary?.uniqueVisitorsToday ?? '—'],
+          ['Visits in last 30 days', summary?.periodVisits ?? '—'],
+          ['Different visitors · 30 days', summary?.periodUniqueVisitors ?? '—'],
+        ].map(([label, value]) => <article key={label} className="rounded-2xl border border-[#e9ede7] bg-white p-4"><p className="text-[10px] font-semibold text-[#7c887f]">{label}</p><p className="mt-2 text-2xl font-bold">{typeof value === 'number' ? value.toLocaleString() : value}</p></article>)}
+      </section>
+      <section className="mb-5 rounded-2xl border border-[#e9ede7] bg-white p-5">
+        <div className="mb-4"><h3 className="text-sm font-bold">Check in a library visitor</h3><p className="mt-1 text-[10px] text-[#929d94]">This records attendance and reading activity only; it does not check a book out.</p></div>
+        <form className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[1.3fr_1.3fr_1fr_auto]" onSubmit={onRecord}>
+          <Field label="Student or teacher">
+            <select required value={form.memberId} onChange={(event) => setForm((current) => ({ ...current, memberId: event.target.value }))}>
+              <option value="">Choose visitor</option>
+              {activeMembers.map((member) => <option key={member.id} value={member.id}>{member.name} · {member.memberType}{member.classSection ? ` · ${member.classSection}` : ''} · {member.membershipNumber}</option>)}
+            </select>
+          </Field>
+          <Field label="Book being read (optional)">
+            <select value={form.bookId} onChange={(event) => setForm((current) => ({ ...current, bookId: event.target.value }))}>
+              <option value="">Not recording a book</option>
+              {books.map((book) => <option key={book.id} value={book.id}>{book.title}{book.isbn ? ` · ${book.isbn}` : ''}</option>)}
+            </select>
+          </Field>
+          <Field label="Visit date"><input required type="date" max={today()} value={date} onChange={(event) => setDate(event.target.value)} /></Field>
+          <ActionButton type="submit" disabled={busy} icon={ClipboardCheck}>{busy ? 'Recording…' : 'Record visit'}</ActionButton>
+        </form>
+      </section>
+      <section className="mb-5 grid gap-5 xl:grid-cols-[1.35fr_1fr]">
+        <article className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
+          <div className="border-b border-[#edf0eb] px-5 py-4"><h3 className="text-sm font-bold">Most frequent library users</h3><p className="mt-1 text-[10px] text-[#929d94]">Ranked by visits during the last 30 days.</p></div>
+          {summary?.frequentUsers?.length ? <div className="divide-y divide-[#f0f2ee]">
+            {summary.frequentUsers.map((member, index) => <div key={member.memberId} className="flex items-center gap-3 px-5 py-3">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#edf4ed] text-[11px] font-bold text-[#52745b]">{index + 1}</span>
+              <div className="min-w-0 flex-1"><p className="truncate text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#8c978f]">{member.memberType}{member.classSection ? ` · ${member.classSection}` : ''} · visited {member.daysVisited} days · last {member.lastVisit}</p></div>
+              <span className="rounded-full bg-[#f3f6f1] px-2.5 py-1 text-[10px] font-bold text-[#587461]">{member.visitCount} visits</span>
+            </div>)}
+          </div> : <p className="px-5 py-10 text-center text-[11px] text-[#829087]">No visits recorded in the last 30 days yet.</p>}
+        </article>
+        <article className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
+          <div className="border-b border-[#edf0eb] px-5 py-4"><h3 className="text-sm font-bold">Books being read</h3><p className="mt-1 text-[10px] text-[#929d94]">Most frequently recorded in the last 30 days.</p></div>
+          {summary?.popularBooks?.length ? <div className="divide-y divide-[#f0f2ee]">
+            {summary.popularBooks.map((book, index) => <div key={book.bookId} className="flex items-center gap-3 px-5 py-3">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-[#f3f6f1] text-[#69846d]"><BookOpen size={15} /></div>
+              <div className="min-w-0 flex-1"><p className="truncate text-[11px] font-bold">{book.title}</p><p className="mt-1 text-[9px] text-[#8c978f]">Reading record #{index + 1}</p></div>
+              <span className="text-[10px] font-bold text-[#587461]">{book.readingCount} visits</span>
+            </div>)}
+          </div> : <p className="px-5 py-10 text-center text-[11px] text-[#829087]">Record a book with a visit to see reading trends.</p>}
+        </article>
+      </section>
+      <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0eb] px-5 py-4">
+          <div><h3 className="text-sm font-bold">Visit register</h3><p className="mt-1 text-[10px] text-[#929d94]">{date} · {visits.length} {visits.length === 1 ? 'visit' : 'visits'}</p></div>
+          <button onClick={onExport} className="flex items-center gap-1.5 rounded-lg border border-[#e8ece6] px-3 py-2 text-[10px] font-bold text-[#607667] hover:bg-[#f7f8f5]"><Download size={13} /> Download this day</button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left">
+            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3">Time</th><th className="px-4 py-3">Visitor</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Membership no.</th><th className="px-5 py-3">Reading</th></tr></thead>
+            <tbody className="divide-y divide-[#f0f2ee]">
+              {visits.map((visit) => <tr key={visit.id}><td className="px-5 py-3 text-[10px] text-[#748078]">{visit.visitTime}</td><td className="px-4 py-3 text-[11px] font-bold">{visit.memberName}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{visit.memberType}{visit.classSection ? ` · ${visit.classSection}` : ''}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{visit.membershipNumber}</td><td className="px-5 py-3 text-[10px] text-[#748078]">{visit.bookTitle || 'Not recorded'}</td></tr>)}
+              {visits.length === 0 && <EmptyRow colSpan={5} message="No visits recorded for this date. Check in the next visitor above." />}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </>
   )
 }

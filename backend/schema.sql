@@ -56,6 +56,19 @@ CREATE TABLE IF NOT EXISTS loans (
   CONSTRAINT fk_loans_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS library_visits (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  member_id BIGINT UNSIGNED NOT NULL,
+  book_id BIGINT UNSIGNED NULL,
+  visit_date DATE NOT NULL,
+  visited_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  recorded_by VARCHAR(120) NOT NULL,
+  INDEX idx_library_visits_date (visit_date, visited_at),
+  INDEX idx_library_visits_member_date (member_id, visit_date),
+  CONSTRAINT fk_library_visits_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_library_visits_book FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   actor VARCHAR(120) NOT NULL,

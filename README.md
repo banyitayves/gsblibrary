@@ -96,6 +96,7 @@ This changes the single librarian account's username and bcrypt password without
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
 - Name, membership-number, class, and member-type search and filters
 - Book checkout with an optional physical copy/accession code, student/teacher loan limits (1/300 active books), return, and overdue tracking
+- Daily library attendance for students and teachers, optional reading-book records, frequent-visitor rankings, and date-based CSV export
 - Borrower counts and filtered circulation/class reports
 - Audit history for library actions
 - JWT sign-in, hashed staff passwords, and Administrator/Librarian permissions
@@ -113,6 +114,10 @@ For students, set `member_type` to `Student` and `class_section` to one of `S1A`
 ### Separate reports
 
 In **Reports**, choose and generate loan activity, overdue loans, returned-loan history, student/teacher borrowing totals, members who have never borrowed, borrowing by class, most-borrowed books, book inventory, or book availability (including out-of-stock books). Reports support the relevant member, class, date, and search filters. Export the generated result as CSV, PDF, or an Excel workbook.
+
+### Library attendance
+
+Open **Library attendance** to record each student or teacher entering the library and optionally note the book they are reading. This is an attendance record, not a checkout, so it does not change book availability or loan limits. The page lists visits by selected date, summarizes today and the last 30 days, ranks frequent visitors, and shows the most-recorded reading books. Download the daily register as a CSV file.
 
 ### Book catalog CSV files
 
@@ -142,7 +147,7 @@ Before deploying school-directory or book catalog changes to an existing databas
 npm.cmd run db:migrate:directory
 ```
 
-It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code to loan records, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
+It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code to loan records, creates the library attendance table, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
 For a deployed Vercel database, an authenticated Librarian or Administrator can apply the same idempotent migration with `POST /api/admin/migrations/school-directory` and a Bearer token.
 
 ## Other commands

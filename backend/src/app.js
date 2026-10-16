@@ -933,6 +933,170 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
   }
 }))
 
+app.get('/api/library-visits', ...staff, asyncRoute(async (req, res) => {
+  const visitDate = String(req.query.date || formatLocalDate(new Date()))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(visitDate)
+    || Number.isNaN(Date.parse(`${visitDate}T00:00:00Z`))
+    || new Date(`${visitDate}T00:00:00Z`).toISOString().slice(0, 10) !== visitDate) {
+    return res.status(400).json({ error: 'Visit date must be a valid date in YYYY-MM-DD format.' })
+  }
+  const [visits] = await pool.execute(
+    `SELECT v.id, v.member_id AS memberId, m.name AS memberName,
+       m.membership_number AS membershipNumber, m.member_type AS memberType,
+       m.class_section AS classSection, b.id AS bookId, b.title AS bookTitle,
+       DATE_FORMAT(v.visit_date, '%Y-%m-%d') AS visitDate,
+       DATE_FORMAT(v.visited_at, '%H:%i') AS visitTime, v.recorded_by AS recordedBy
+     FROM library_visits v
+     JOIN members m ON m.id = v.member_id
+     LEFT JOIN books b ON b.id = v.book_id
+     WHERE v.visit_date = ?
+     ORDER BY v.visited_at DESC, v.id DESC`,
+    [visitDate],
+  )
+  res.json(visits.map((visit) => ({
+    ...visit,
+    id: Number(visit.id),
+    memberId: Number(visit.memberId),
+    bookId: visit.bookId === null ? null : Number(visit.bookId),
+  })))
+}))
+
+app.get('/api/library-visits/summary', ...staff, asyncRoute(async (req, res) => {
+  const days = Number(req.query.days || 30)
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    return res.status(400).json({ error: 'Summary period must be between 1 and 365 days.' })
+  }
+  const asOfDate = String(req.query.date || formatLocalDate(new Date()))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)
+    || Number.isNaN(Date.parse(`${asOfDate}T00:00:00Z`))
+    || new Date(`${asOfDate}T00:00:00Z`).toISOString().slice(0, 10) !== asOfDate) {
+    return res.status(400).json({ error: 'Summary date must be a valid date in YYYY-MM-DD format.' })
+  }
+  const [[today]] = await pool.execute(
+    `SELECT COUNT(*) AS visitsToday, COUNT(DISTINCT member_id) AS uniqueVisitorsToday
+     FROM library_visits WHERE visit_date = ?`,
+    [asOfDate],
+  )
+  const [[period]] = await pool.execute(
+    `SELECT COUNT(*) AS visits, COUNT(DISTINCT member_id) AS uniqueVisitors
+     FROM library_visits WHERE visit_date BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND ?`,
+    [asOfDate, days - 1, asOfDate],
+  )
+  const [frequentUsers] = await pool.execute(
+    `SELECT m.id AS memberId, m.name, m.membership_number AS membershipNumber,
+       m.member_type AS memberType, m.class_section AS classSection,
+       COUNT(v.id) AS visitCount,
+       COUNT(DISTINCT v.visit_date) AS daysVisited,
+       DATE_FORMAT(MAX(v.visited_at), '%Y-%m-%d %H:%i') AS lastVisit
+     FROM library_visits v JOIN members m ON m.id = v.member_id
+     WHERE v.visit_date BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND ?
+     GROUP BY m.id, m.name, m.membership_number, m.member_type, m.class_section
+     ORDER BY visitCount DESC, daysVisited DESC, m.name LIMIT 10`,
+    [asOfDate, days - 1, asOfDate],
+  )
+  const [popularBooks] = await pool.execute(
+    `SELECT b.id AS bookId, b.title, COUNT(v.id) AS readingCount
+     FROM library_visits v JOIN books b ON b.id = v.book_id
+     WHERE v.visit_date BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND ?
+     GROUP BY b.id, b.title ORDER BY readingCount DESC, b.title LIMIT 5`,
+    [asOfDate, days - 1, asOfDate],
+  )
+  res.json({
+    days,
+    asOfDate,
+    visitsToday: Number(today.visitsToday),
+    uniqueVisitorsToday: Number(today.uniqueVisitorsToday),
+    periodVisits: Number(period.visits),
+    periodUniqueVisitors: Number(period.uniqueVisitors),
+    frequentUsers: frequentUsers.map((member) => ({
+      ...member,
+      memberId: Number(member.memberId),
+      visitCount: Number(member.visitCount),
+      daysVisited: Number(member.daysVisited),
+    })),
+    popularBooks: popularBooks.map((book) => ({
+      ...book,
+      bookId: Number(book.bookId),
+      readingCount: Number(book.readingCount),
+    })),
+  })
+}))
+
+app.post('/api/library-visits', ...canManage, asyncRoute(async (req, res) => {
+  const memberId = Number(req.body.memberId)
+  const bookId = req.body.bookId ? Number(req.body.bookId) : null
+  const visitDate = String(req.body.visitDate || formatLocalDate(new Date()))
+  if (!Number.isInteger(memberId) || memberId < 1 || (bookId !== null && (!Number.isInteger(bookId) || bookId < 1))) {
+    return res.status(400).json({ error: 'Select a valid library member and book.' })
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(visitDate)
+    || Number.isNaN(Date.parse(`${visitDate}T00:00:00Z`))
+    || new Date(`${visitDate}T00:00:00Z`).toISOString().slice(0, 10) !== visitDate) {
+    return res.status(400).json({ error: 'Visit date must be a valid date in YYYY-MM-DD format.' })
+  }
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[member]] = await connection.execute(
+      'SELECT id, name FROM members WHERE id = ? AND status = ? FOR UPDATE',
+      [memberId, 'Active'],
+    )
+    if (!member) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Active library member not found.' })
+    }
+    let book = null
+    if (bookId !== null) {
+      const [[selectedBook]] = await connection.execute('SELECT id, title FROM books WHERE id = ?', [bookId])
+      if (!selectedBook) {
+        await connection.rollback()
+        return res.status(404).json({ error: 'Selected reading book was not found.' })
+      }
+      book = selectedBook
+    }
+    const [result] = await connection.execute(
+      'INSERT INTO library_visits (member_id, book_id, visit_date, recorded_by) VALUES (?, ?, ?, ?)',
+      [memberId, bookId, visitDate, req.user.name],
+    )
+    await audit(connection, req.user.name, 'Library visit recorded', `${member.name} visited the library${book ? ` to read "${book.title}"` : ''}`)
+    await connection.commit()
+    res.status(201).json({
+      id: Number(result.insertId),
+      memberId,
+      memberName: member.name,
+      bookId,
+      bookTitle: book?.title || null,
+      visitDate,
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}))
+
+app.get('/api/export/library-visits.csv', ...staff, asyncRoute(async (req, res) => {
+  const visitDate = String(req.query.date || formatLocalDate(new Date()))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(visitDate)
+    || Number.isNaN(Date.parse(`${visitDate}T00:00:00Z`))
+    || new Date(`${visitDate}T00:00:00Z`).toISOString().slice(0, 10) !== visitDate) {
+    return res.status(400).json({ error: 'Visit date must be a valid date in YYYY-MM-DD format.' })
+  }
+  const [visits] = await pool.execute(
+    `SELECT DATE_FORMAT(v.visit_date, '%Y-%m-%d') AS visitDate,
+       DATE_FORMAT(v.visited_at, '%H:%i') AS visitTime, m.name AS memberName,
+       m.membership_number AS membershipNumber, m.member_type AS memberType,
+       m.class_section AS classSection, b.title AS bookTitle, v.recorded_by AS recordedBy
+     FROM library_visits v JOIN members m ON m.id = v.member_id
+     LEFT JOIN books b ON b.id = v.book_id
+     WHERE v.visit_date = ? ORDER BY v.visited_at DESC, v.id DESC`,
+    [visitDate],
+  )
+  const columns = ['visitDate', 'visitTime', 'memberName', 'membershipNumber', 'memberType', 'classSection', 'bookTitle', 'recordedBy']
+  res.type('text/csv').attachment(`gs-busanza-library-attendance-${visitDate}.csv`).send(csvDocument(columns, visits))
+}))
+
 app.post('/api/loans/:id/return', ...canManage, asyncRoute(async (req, res) => {
   const connection = await pool.getConnection()
   try {
