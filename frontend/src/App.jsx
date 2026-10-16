@@ -17,7 +17,6 @@ import {
   LogOut,
   Plus,
   Search,
-  ShieldCheck,
   Sparkles,
   Upload,
   UsersRound,
@@ -79,7 +78,7 @@ function App() {
   const [bookForm, setBookForm] = useState(initialBook)
   const [memberForm, setMemberForm] = useState({ name: '', email: '', memberType: 'Student', classSection: 'S1A' })
   const [loanForm, setLoanForm] = useState({ bookId: '', memberId: '', dueDate: '' })
-  const [loginForm, setLoginForm] = useState({ email: 'admin@library.local', password: 'admin123' })
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState('')
   const toastTimer = useRef(null)
@@ -349,6 +348,7 @@ function App() {
     <div className="min-h-screen bg-[#f7f8f5] text-[#1d302b]">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-[252px] flex-col border-r border-[#e9ede7] bg-white px-5 py-6 lg:flex">
         <Brand />
+        <SchoolContact className="mt-4 rounded-xl bg-[#f6f8f4] px-3 py-3 text-[#65756a]" />
         <div className="mb-3 mt-10 px-3 text-[10px] font-bold uppercase tracking-[.16em] text-[#a0aba3]">Workspace</div>
         <nav className="space-y-1">
           {navigation.map(({ id, label, icon: Icon }) => (
@@ -551,8 +551,18 @@ function App() {
 function Brand({ compact = false }) {
   return (
     <div className="flex items-center gap-3">
-      <img src="/gs-busanza-crest.png" alt="GS Busanza crest" className="size-10 shrink-0 rounded-xl object-contain" />
-      {!compact && <div><p className="text-[15px] font-extrabold tracking-[-.045em]">GS Busanza</p><p className="mt-0.5 text-[10px] font-medium text-[#929d94]">School library · NSHIMIYIMANA Yves</p></div>}
+      <img src="/gs-busanza-crest.png" alt="GS Busanza crest" className={`${compact ? 'size-12' : 'size-16'} shrink-0 rounded-xl object-contain`} />
+      {!compact && <div><p className="text-[18px] font-extrabold tracking-[-.045em]">GS Busanza</p><p className="mt-0.5 text-[11px] font-medium text-[#929d94]">School library</p></div>}
+    </div>
+  )
+}
+
+function SchoolContact({ className = 'text-[#65756a]' }) {
+  return (
+    <div className={`space-y-1.5 text-[10px] leading-relaxed ${className}`}>
+      <p><span className="font-semibold">Headteacher:</span> MUKESHIMANA Vestine</p>
+      <p><span className="font-semibold">Librarian:</span> NSHIMIYIMANA Yves</p>
+      <p><span className="font-semibold">Telephone:</span> <a href="tel:+250791756160" className="underline underline-offset-2">+250 791 756 160</a></p>
     </div>
   )
 }
@@ -584,7 +594,7 @@ function Login({ form, setForm, onSubmit, busy, toast }) {
             <div><p className="text-[11px] font-semibold text-white">Made for your community</p><p className="mt-0.5 text-[10px] text-[#d0ddd1]/60">Every story starts somewhere</p></div>
           </div>
         </div>
-        <p className="relative text-[10px] text-white/60">GS Busanza · Librarian: NSHIMIYIMANA Yves</p>
+        <SchoolContact className="relative text-white/85" />
       </section>
       <section className="flex min-h-screen items-center justify-center px-6 py-12 sm:px-10">
         <div className="w-full max-w-[380px]">
@@ -593,14 +603,11 @@ function Login({ form, setForm, onSubmit, busy, toast }) {
           <h2 className="mt-3 text-[32px] font-bold tracking-[-.055em]">Sign in to your library</h2>
           <p className="mt-2 text-[13px] leading-6 text-[#8b958e]">A good day to discover something new.</p>
           <form onSubmit={onSubmit} className="mt-8 space-y-5">
-            <Field label="Email address"><input required autoComplete="username" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
+            <Field label="Username"><input required autoComplete="username" type="text" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
             <Field label="Password"><input required autoComplete="current-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
             <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3.5 text-[13px] font-bold text-white transition hover:bg-[#284a39] disabled:cursor-wait disabled:opacity-70">{busy ? 'Signing you in…' : 'Sign in'} <ArrowRight size={15} /></button>
           </form>
-          <div className="mt-8 rounded-xl border border-[#e9ede7] bg-[#fafbf9] p-4">
-            <p className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.1em] text-[#74877a]"><ShieldCheck size={13} /> Demo account</p>
-            <p className="text-[11px] leading-5 text-[#79857c]">Email: <span className="font-semibold text-[#46574c]">admin@library.local</span><br />Password: <span className="font-semibold text-[#46574c]">admin123</span></p>
-          </div>
+          <div className="mt-8 rounded-xl border border-[#e9ede7] bg-[#fafbf9] p-4"><SchoolContact /></div>
           <p className="mt-8 text-center text-[10px] text-[#a1aaa2]">Your library, always in good hands.</p>
         </div>
         {toast && <div role="alert" className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-[#263b31] px-4 py-3 text-sm text-white shadow-xl">{toast}</div>}

@@ -70,14 +70,22 @@ If your provider requires a custom certificate, also set `DB_SSL_CA` to its CA c
 
 After saving or changing environment variables, **redeploy** so the backend service receives the updated settings. Verify the deployed database/API connection at `https://<your-deployment-domain>/api/health`. A healthy deployment responds with `{"status":"ok","database":"connected"}`. Database connection problems return an API error with a message directing you to the `DB_*` and `DB_SSL` settings.
 
-## Demo sign-in
+## Staff sign-in
 
-| Role | Email | Password |
-| --- | --- | --- |
-| Administrator | `admin@library.local` | `admin123` |
-| Librarian | `librarian@library.local` | `lib123` |
+Use the librarian username and password set for your school deployment. Login accepts a username; it does not need to be an email address.
 
-Change or remove the sample accounts before using this app with real users.
+For an existing database, change the librarian login from a trusted machine using environment variables (do not put the password in source control):
+
+```powershell
+$env:LIBRARIAN_USERNAME = Read-Host "New librarian username"
+$securePassword = Read-Host "New librarian password" -AsSecureString
+$env:LIBRARIAN_PASSWORD = [System.Net.NetworkCredential]::new("", $securePassword).Password
+npm.cmd run db:update-librarian-login
+Remove-Item Env:LIBRARIAN_USERNAME, Env:LIBRARIAN_PASSWORD
+Remove-Variable securePassword
+```
+
+This changes the single librarian account's username and bcrypt password without changing administrator access. For new databases, replace the sample staff accounts and their default passwords before deployment.
 
 ## Features
 
@@ -118,5 +126,6 @@ npm.cmd run build        # Build the frontend
 npm.cmd run lint         # Lint the frontend
 npm.cmd run db:setup     # Apply schema and sample data to configured MySQL
 npm.cmd run db:migrate:directory # Apply the existing-database school directory migration
+npm.cmd run db:update-librarian-login # Set a librarian username and password from environment variables
 npm.cmd start            # Start the Express API
 ```

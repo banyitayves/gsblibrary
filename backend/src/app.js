@@ -166,8 +166,8 @@ app.get('/api/health', asyncRoute(async (_req, res) => {
 }))
 
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
-  const email = String(req.body.email || '').trim().toLowerCase()
-  const password = String(req.body.password || '')
+  const email = String(req.body?.email || '').trim().toLowerCase()
+  const password = String(req.body?.password || '')
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required.' })
   }
