@@ -130,10 +130,10 @@ function reportFilters(query, includeStatus = true, dateColumn = 'l.issued_at') 
     params.push(query.memberType)
   }
   if (includeStatus) {
-    if (query.status === 'Active') conditions.push('l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date >= CURRENT_DATE()')
-    else if (query.status === 'Overdue') conditions.push('l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()')
-    else if (query.status === 'Returned') conditions.push('l.returned_at IS NOT NULL')
-    else if (query.status === 'Missed') conditions.push('l.missed_at IS NOT NULL')
+    if (query.status === 'Active') conditions.push('(l.quantity > l.returned_quantity + l.missed_quantity) AND l.due_date >= CURRENT_DATE()')
+    else if (query.status === 'Overdue') conditions.push('(l.quantity > l.returned_quantity + l.missed_quantity) AND l.due_date < CURRENT_DATE()')
+    else if (query.status === 'Returned') conditions.push('l.returned_at IS NOT NULL AND l.missed_quantity = 0')
+    else if (query.status === 'Missed') conditions.push('l.missed_quantity > 0')
     else if (query.status && query.status !== 'All') return { error: 'Choose a valid report status.' }
   }
   return { where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params }
@@ -146,9 +146,13 @@ const loanReportSelect = `SELECT l.id, b.title AS bookTitle, b.isbn,
   DATE_FORMAT(l.due_date, '%Y-%m-%d') AS dueDate,
   DATE_FORMAT(l.returned_at, '%Y-%m-%d') AS returnedAt,
   DATE_FORMAT(l.missed_at, '%Y-%m-%d') AS missedAt,
-  CASE WHEN l.missed_at IS NOT NULL THEN 'Missed'
-       WHEN l.returned_at IS NOT NULL THEN 'Returned'
-       WHEN l.due_date < CURRENT_DATE() THEN 'Overdue' ELSE 'Active' END AS status
+  l.quantity, l.returned_quantity AS returnedQuantity,
+  l.missed_quantity AS missedQuantity,
+  (l.quantity - l.returned_quantity - l.missed_quantity) AS outstandingQuantity,
+  CASE WHEN l.quantity > l.returned_quantity + l.missed_quantity AND l.due_date < CURRENT_DATE() THEN 'Overdue'
+       WHEN l.quantity > l.returned_quantity + l.missed_quantity THEN 'Active'
+       WHEN l.missed_quantity > 0 THEN 'Missed'
+       ELSE 'Returned' END AS status
   FROM loans l JOIN books b ON b.id = l.book_id JOIN members m ON m.id = l.member_id`
 
 function validateBook(body) {
@@ -274,12 +278,12 @@ app.get('/api/dashboard', ...staff, asyncRoute(async (_req, res) => {
     `SELECT
       (SELECT COALESCE(SUM(total_copies), 0) FROM books) AS totalBooks,
       (SELECT COALESCE(SUM(available_copies), 0) FROM books) AS availableBooks,
-      (SELECT COUNT(*) FROM loans WHERE returned_at IS NULL AND missed_at IS NULL) AS activeLoans,
-      (SELECT COUNT(*) FROM loans WHERE returned_at IS NULL AND missed_at IS NULL AND due_date < CURRENT_DATE()) AS overdueLoans,
+      (SELECT COALESCE(SUM(quantity - returned_quantity - missed_quantity), 0) FROM loans WHERE quantity > returned_quantity + missed_quantity) AS activeLoans,
+      (SELECT COALESCE(SUM(quantity - returned_quantity - missed_quantity), 0) FROM loans WHERE quantity > returned_quantity + missed_quantity AND due_date < CURRENT_DATE()) AS overdueLoans,
       (SELECT COUNT(*) FROM members WHERE status = 'Active') AS activeMembers`,
   )
   const [monthlyRows] = await pool.query(
-    `SELECT DATE_FORMAT(issued_at, '%Y-%m') AS monthKey, COUNT(*) AS total
+    `SELECT DATE_FORMAT(issued_at, '%Y-%m') AS monthKey, COALESCE(SUM(quantity), 0) AS total
      FROM loans
      WHERE issued_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 5 MONTH)
      GROUP BY monthKey ORDER BY monthKey`,
@@ -420,7 +424,7 @@ app.put('/api/books/:id', ...canManage, asyncRoute(async (req, res) => {
     await connection.beginTransaction()
     const [[book]] = await connection.execute(
       `SELECT b.id, b.available_copies,
-       (SELECT COUNT(*) FROM loans WHERE book_id = b.id AND returned_at IS NULL AND missed_at IS NULL) AS borrowed
+       (SELECT COALESCE(SUM(quantity - returned_quantity - missed_quantity), 0) FROM loans WHERE book_id = b.id AND quantity > returned_quantity + missed_quantity) AS borrowed
        FROM books b WHERE b.id = ? FOR UPDATE`,
       [req.params.id],
     )
@@ -485,8 +489,8 @@ app.get('/api/members', ...staff, asyncRoute(async (req, res) => {
     `SELECT m.id, m.membership_number AS membershipNumber, m.name, m.email, m.phone,
        m.member_type AS memberType, m.class_section AS classSection, m.status,
        DATE_FORMAT(m.joined_at, '%Y-%m-%d') AS joinedAt,
-       (SELECT COUNT(*) FROM loans l WHERE l.member_id = m.id AND l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
-       (SELECT COUNT(*) FROM loans l WHERE l.member_id = m.id) AS totalLoans
+       (SELECT COALESCE(SUM(l.quantity - l.returned_quantity - l.missed_quantity), 0) FROM loans l WHERE l.member_id = m.id AND l.quantity > l.returned_quantity + l.missed_quantity) AS activeLoans,
+       (SELECT COALESCE(SUM(l.quantity), 0) FROM loans l WHERE l.member_id = m.id) AS totalLoans
      FROM members m
      WHERE m.name LIKE ? OR m.email LIKE ? OR m.phone LIKE ? OR m.membership_number LIKE ? OR m.class_section LIKE ?
      ORDER BY name`,
@@ -669,11 +673,13 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
   const overdueOnly = filter === 'Overdue'
   const activeOnly = filter === 'Active'
   const missedOnly = filter === 'Missed'
+  const returnedOnly = filter === 'Returned'
   const where = overdueOnly
-    ? 'WHERE l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()'
+    ? 'WHERE l.quantity > l.returned_quantity + l.missed_quantity AND l.due_date < CURRENT_DATE()'
     : activeOnly
-      ? 'WHERE l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date >= CURRENT_DATE()'
-      : missedOnly ? 'WHERE l.missed_at IS NOT NULL' : ''
+      ? 'WHERE l.quantity > l.returned_quantity + l.missed_quantity AND l.due_date >= CURRENT_DATE()'
+      : missedOnly ? 'WHERE l.missed_quantity > 0'
+        : returnedOnly ? 'WHERE l.quantity = l.returned_quantity AND l.missed_quantity = 0' : ''
   const [loans] = await pool.query(
     `SELECT l.id, b.id AS bookId, b.title AS bookTitle, b.isbn, l.copy_code AS copyCode,
        m.id AS memberId, m.name AS memberName, m.membership_number AS membershipNumber,
@@ -682,9 +688,13 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
        DATE_FORMAT(l.due_date, '%Y-%m-%d') AS dueDate,
        DATE_FORMAT(l.returned_at, '%Y-%m-%d') AS returnedAt,
        DATE_FORMAT(l.missed_at, '%Y-%m-%d') AS missedAt,
-       CASE WHEN l.missed_at IS NOT NULL THEN 'Missed'
-            WHEN l.returned_at IS NOT NULL THEN 'Returned'
-            WHEN l.due_date < CURRENT_DATE() THEN 'Overdue' ELSE 'Active' END AS status
+       l.quantity, l.returned_quantity AS returnedQuantity,
+       l.missed_quantity AS missedQuantity,
+       (l.quantity - l.returned_quantity - l.missed_quantity) AS outstandingQuantity,
+       CASE WHEN l.quantity > l.returned_quantity + l.missed_quantity AND l.due_date < CURRENT_DATE() THEN 'Overdue'
+            WHEN l.quantity > l.returned_quantity + l.missed_quantity THEN 'Active'
+            WHEN l.missed_quantity > 0 THEN 'Missed'
+            ELSE 'Returned' END AS status
      FROM loans l JOIN books b ON b.id = l.book_id JOIN members m ON m.id = l.member_id
      ${where} ORDER BY l.issued_at DESC`,
   )
@@ -704,13 +714,13 @@ app.get('/api/reports', ...staff, asyncRoute(async (req, res) => {
     filters.params,
   )
   const [[summary]] = await pool.execute(
-    `SELECT COUNT(*) AS totalLoans,
-       SUM(l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
-       SUM(l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans,
-       SUM(l.returned_at IS NOT NULL) AS returnedLoans,
-       SUM(l.missed_at IS NOT NULL) AS missedLoans,
-       SUM(m.member_type = 'Student') AS studentLoans,
-       SUM(m.member_type = 'Teacher') AS teacherLoans
+    `SELECT COALESCE(SUM(l.quantity), 0) AS totalLoans,
+      COALESCE(SUM(l.quantity - l.returned_quantity - l.missed_quantity), 0) AS activeLoans,
+      COALESCE(SUM((l.quantity - l.returned_quantity - l.missed_quantity) * (l.due_date < CURRENT_DATE())), 0) AS overdueLoans,
+      COALESCE(SUM(l.returned_quantity), 0) AS returnedLoans,
+      COALESCE(SUM(l.missed_quantity), 0) AS missedLoans,
+      COALESCE(SUM(l.quantity * (m.member_type = 'Student')), 0) AS studentLoans,
+      COALESCE(SUM(l.quantity * (m.member_type = 'Teacher')), 0) AS teacherLoans
      FROM loans l JOIN members m ON m.id = l.member_id
      JOIN books b ON b.id = l.book_id ${summaryFilters.where}`,
     summaryFilters.params,
@@ -748,9 +758,9 @@ app.get('/api/reports/people', ...staff, asyncRoute(async (req, res) => {
   const [people] = await pool.execute(
     `SELECT m.id, m.name, m.membership_number AS membershipNumber, m.email, m.phone,
        m.member_type AS memberType, m.class_section AS classSection, m.status,
-       COUNT(l.id) AS totalLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
+       COALESCE(SUM(l.quantity), 0) AS totalLoans,
+       COALESCE(SUM(l.quantity - l.returned_quantity - l.missed_quantity), 0) AS activeLoans,
+       COALESCE(SUM((l.quantity - l.returned_quantity - l.missed_quantity) * (l.due_date < CURRENT_DATE())), 0) AS overdueLoans
      FROM members m LEFT JOIN loans l ON l.member_id = m.id
      ${where}
      GROUP BY m.id, m.name, m.membership_number, m.email, m.phone, m.member_type, m.class_section, m.status
@@ -786,9 +796,9 @@ app.get('/api/reports/classes', ...staff, asyncRoute(async (req, res) => {
   }
   const [classes] = await pool.execute(
     `SELECT c.classSection, COUNT(DISTINCT m.id) AS students,
-       COUNT(l.id) AS totalLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
+       COALESCE(SUM(l.quantity), 0) AS totalLoans,
+       COALESCE(SUM(l.quantity - l.returned_quantity - l.missed_quantity), 0) AS activeLoans,
+       COALESCE(SUM((l.quantity - l.returned_quantity - l.missed_quantity) * (l.due_date < CURRENT_DATE())), 0) AS overdueLoans
      FROM (${classRows}) c
      LEFT JOIN members m ON m.class_section = c.classSection AND m.member_type = 'Student'
      LEFT JOIN loans l ON l.member_id = m.id${loanDateFilter.length ? ` AND ${loanDateFilter.join(' AND ')}` : ''}
@@ -838,7 +848,7 @@ app.get('/api/reports/popular-books', ...staff, asyncRoute(async (req, res) => {
   if (filters.error) return res.status(400).json({ error: filters.error })
   const [books] = await pool.execute(
     `SELECT b.id, b.isbn, b.title, b.author, b.publisher, b.category, b.grade, b.shelf,
-       COUNT(l.id) AS totalLoans, COUNT(DISTINCT l.member_id) AS uniqueBorrowers
+       COALESCE(SUM(l.quantity), 0) AS totalLoans, COUNT(DISTINCT l.member_id) AS uniqueBorrowers
      FROM loans l JOIN books b ON b.id = l.book_id JOIN members m ON m.id = l.member_id
      ${filters.where}
      GROUP BY b.id, b.isbn, b.title, b.author, b.publisher, b.category, b.grade, b.shelf
@@ -880,9 +890,9 @@ app.get('/api/export/people.csv', ...staff, asyncRoute(async (req, res) => {
   const [people] = await pool.execute(
     `SELECT m.name, m.membership_number AS membershipNumber, m.member_type AS memberType,
        m.class_section AS classSection, m.email, m.phone, m.status,
-       COUNT(l.id) AS totalLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
+       COALESCE(SUM(l.quantity), 0) AS totalLoans,
+       COALESCE(SUM(l.quantity - l.returned_quantity - l.missed_quantity), 0) AS activeLoans,
+       COALESCE(SUM((l.quantity - l.returned_quantity - l.missed_quantity) * (l.due_date < CURRENT_DATE())), 0) AS overdueLoans
      FROM members m LEFT JOIN loans l ON l.member_id = m.id
      ${where}
      GROUP BY m.id, m.name, m.membership_number, m.member_type, m.class_section, m.email, m.phone, m.status
@@ -913,9 +923,9 @@ app.get('/api/export/classes.csv', ...staff, asyncRoute(async (req, res) => {
   }
   const [classes] = await pool.execute(
     `SELECT c.classSection, COUNT(DISTINCT m.id) AS students,
-       COUNT(l.id) AS totalLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
+       COALESCE(SUM(l.quantity), 0) AS totalLoans,
+       COALESCE(SUM(l.quantity - l.returned_quantity - l.missed_quantity), 0) AS activeLoans,
+       COALESCE(SUM((l.quantity - l.returned_quantity - l.missed_quantity) * (l.due_date < CURRENT_DATE())), 0) AS overdueLoans
      FROM (${classRows}) c
      LEFT JOIN members m ON m.class_section = c.classSection AND m.member_type = 'Student'
      LEFT JOIN loans l ON l.member_id = m.id${loanDateFilter.length ? ` AND ${loanDateFilter.join(' AND ')}` : ''}
@@ -929,9 +939,12 @@ app.get('/api/export/classes.csv', ...staff, asyncRoute(async (req, res) => {
 app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
   const bookId = Number(req.body.bookId)
   const memberId = Number(req.body.memberId)
+  const quantity = Number(req.body.quantity ?? 1)
   const dueDate = String(req.body.dueDate || '')
-  if (!Number.isInteger(bookId) || !Number.isInteger(memberId) || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
-    return res.status(400).json({ error: 'Choose a book, a member, and a valid due date.' })
+  if (!Number.isSafeInteger(bookId) || bookId < 1 || !Number.isSafeInteger(memberId) || memberId < 1
+    || !Number.isInteger(quantity) || quantity < 1 || quantity > 300
+    || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    return res.status(400).json({ error: 'Choose a book, a member, a quantity from 1 to 300, and a valid due date.' })
   }
 
   const connection = await pool.getConnection()
@@ -945,9 +958,9 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
       await connection.rollback()
       return res.status(404).json({ error: 'Book not found.' })
     }
-    if (book.available_copies < 1) {
+    if (book.available_copies < quantity) {
       await connection.rollback()
-      return res.status(409).json({ error: 'There are no available copies of this book.' })
+      return res.status(409).json({ error: `Only ${book.available_copies} ${Number(book.available_copies) === 1 ? 'copy is' : 'copies are'} available.` })
     }
     const [[member]] = await connection.execute(
       'SELECT id, name, member_type AS memberType FROM members WHERE id = ? AND status = ? FOR UPDATE',
@@ -957,15 +970,19 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
       await connection.rollback()
       return res.status(404).json({ error: 'Active member not found.' })
     }
+    if (member.memberType === 'Student' && quantity !== 1) {
+      await connection.rollback()
+      return res.status(400).json({ error: 'Students may check out only one book at a time.' })
+    }
     const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 1
     const [[loanCount]] = await connection.execute(
-      'SELECT COUNT(*) AS activeLoans FROM loans WHERE member_id = ? AND returned_at IS NULL AND missed_at IS NULL',
+      'SELECT COALESCE(SUM(quantity - returned_quantity - missed_quantity), 0) AS activeLoans FROM loans WHERE member_id = ? AND quantity > returned_quantity + missed_quantity',
       [memberId],
     )
-    if (Number(loanCount.activeLoans) >= maximumActiveLoans) {
+    if (Number(loanCount.activeLoans) + quantity > maximumActiveLoans) {
       await connection.rollback()
       return res.status(409).json({
-        error: `${member.memberType}s may have at most ${maximumActiveLoans} active book${maximumActiveLoans === 1 ? '' : 's'} checked out at a time.`,
+        error: `${member.memberType}s may have at most ${maximumActiveLoans} active book${maximumActiveLoans === 1 ? '' : 's'} at a time; this member has ${loanCount.activeLoans} active book${Number(loanCount.activeLoans) === 1 ? '' : 's'}.`,
       })
     }
 
@@ -976,7 +993,7 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
     }
     if (copyCode) {
       const [[existingCopy]] = await connection.execute(
-        'SELECT id FROM loans WHERE copy_code = ? AND returned_at IS NULL LIMIT 1 FOR UPDATE',
+        'SELECT id FROM loans WHERE copy_code = ? AND quantity > returned_quantity + missed_quantity LIMIT 1 FOR UPDATE',
         [copyCode],
       )
       if (existingCopy) {
@@ -985,16 +1002,16 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
       }
     }
     const [result] = await connection.execute(
-      'INSERT INTO loans (book_id, member_id, due_date, copy_code) VALUES (?, ?, ?, ?)',
-      [bookId, memberId, dueDate, copyCode || null],
+      'INSERT INTO loans (book_id, member_id, due_date, quantity, copy_code) VALUES (?, ?, ?, ?, ?)',
+      [bookId, memberId, dueDate, quantity, copyCode || null],
     )
     await connection.execute(
-      'UPDATE books SET available_copies = available_copies - 1 WHERE id = ?',
-      [bookId],
+      'UPDATE books SET available_copies = available_copies - ? WHERE id = ?',
+      [quantity, bookId],
     )
     await audit(connection, req.user.name, 'Book checked out', `"${book.title}" checked out to ${member.name}`)
     await connection.commit()
-    res.status(201).json({ id: result.insertId, bookId, memberId, bookTitle: book.title, memberName: member.name, dueDate, copyCode: copyCode || null, status: 'Active' })
+    res.status(201).json({ id: result.insertId, bookId, memberId, bookTitle: book.title, memberName: member.name, dueDate, quantity, returnedQuantity: 0, missedQuantity: 0, outstandingQuantity: quantity, copyCode: copyCode || null, status: 'Active' })
   } catch (error) {
     await connection.rollback()
     throw error
@@ -1168,11 +1185,16 @@ app.get('/api/export/library-visits.csv', ...staff, asyncRoute(async (req, res) 
 }))
 
 app.post('/api/loans/:id/return', ...canManage, asyncRoute(async (req, res) => {
+  const quantity = Number(req.body.quantity)
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 300) {
+    return res.status(400).json({ error: 'Enter a return quantity from 1 to 300.' })
+  }
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
     const [[loan]] = await connection.execute(
-      `SELECT l.id, l.book_id AS bookId, l.returned_at AS returnedAt, l.missed_at AS missedAt, b.title
+      `SELECT l.id, l.book_id AS bookId, l.quantity, l.returned_quantity AS returnedQuantity,
+       l.missed_quantity AS missedQuantity, l.missed_at AS missedAt, b.title
        FROM loans l JOIN books b ON b.id = l.book_id WHERE l.id = ? FOR UPDATE`,
       [req.params.id],
     )
@@ -1180,18 +1202,29 @@ app.post('/api/loans/:id/return', ...canManage, asyncRoute(async (req, res) => {
       await connection.rollback()
       return res.status(404).json({ error: 'Loan not found.' })
     }
-    if (loan.returnedAt || loan.missedAt) {
+    const outstanding = Number(loan.quantity) - Number(loan.returnedQuantity) - Number(loan.missedQuantity)
+    if (outstanding < 1) {
       await connection.rollback()
-      return res.status(409).json({ error: loan.missedAt ? 'This loan was already marked as missed.' : 'This book has already been returned.' })
+      return res.status(409).json({ error: 'There are no outstanding copies left on this checkout.' })
     }
-    await connection.execute('UPDATE loans SET returned_at = CURRENT_TIMESTAMP WHERE id = ?', [loan.id])
+    if (quantity > outstanding) {
+      await connection.rollback()
+      return res.status(400).json({ error: `Only ${outstanding} outstanding ${outstanding === 1 ? 'copy remains' : 'copies remain'} on this checkout.` })
+    }
+    const returnedQuantity = Number(loan.returnedQuantity) + quantity
+    const complete = returnedQuantity + Number(loan.missedQuantity) === Number(loan.quantity)
     await connection.execute(
-      'UPDATE books SET available_copies = LEAST(total_copies, available_copies + 1) WHERE id = ?',
-      [loan.bookId],
+      `UPDATE loans SET returned_quantity = ?, returned_at = ${complete ? 'CURRENT_TIMESTAMP' : 'NULL'}
+       WHERE id = ?`,
+      [returnedQuantity, loan.id],
     )
-    await audit(connection, req.user.name, 'Book returned', `"${loan.title}" returned to the library`)
+    await connection.execute(
+      'UPDATE books SET available_copies = LEAST(total_copies, available_copies + ?) WHERE id = ?',
+      [quantity, loan.bookId],
+    )
+    await audit(connection, req.user.name, 'Book returned', `${quantity} ${loan.title} ${quantity === 1 ? 'copy' : 'copies'} returned to the library`)
     await connection.commit()
-    res.json({ message: 'Book returned successfully.' })
+    res.json({ message: `${quantity} ${quantity === 1 ? 'copy' : 'copies'} returned successfully.`, returnedQuantity, outstandingQuantity: outstanding - quantity })
   } catch (error) {
     await connection.rollback()
     throw error
@@ -1201,12 +1234,17 @@ app.post('/api/loans/:id/return', ...canManage, asyncRoute(async (req, res) => {
 }))
 
 app.post('/api/loans/:id/missed', ...canManage, asyncRoute(async (req, res) => {
+  const quantity = Number(req.body.quantity)
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 300) {
+    return res.status(400).json({ error: 'Enter a missed quantity from 1 to 300.' })
+  }
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
     const [[loan]] = await connection.execute(
       `SELECT l.id, l.book_id AS bookId, l.member_id AS memberId,
-       l.returned_at AS returnedAt, l.missed_at AS missedAt,
+       l.quantity, l.returned_quantity AS returnedQuantity,
+       l.missed_quantity AS missedQuantity, l.missed_at AS missedAt,
        b.title, m.name AS memberName
        FROM loans l JOIN books b ON b.id = l.book_id
        JOIN members m ON m.id = l.member_id
@@ -1217,23 +1255,34 @@ app.post('/api/loans/:id/missed', ...canManage, asyncRoute(async (req, res) => {
       await connection.rollback()
       return res.status(404).json({ error: 'Loan not found.' })
     }
-    if (loan.returnedAt || loan.missedAt) {
+    const outstanding = Number(loan.quantity) - Number(loan.returnedQuantity) - Number(loan.missedQuantity)
+    if (outstanding < 1) {
       await connection.rollback()
-      return res.status(409).json({ error: loan.missedAt ? 'This loan was already marked as missed.' : 'A returned book cannot be marked as missed.' })
+      return res.status(409).json({ error: 'There are no outstanding copies left on this checkout.' })
+    }
+    if (quantity > outstanding) {
+      await connection.rollback()
+      return res.status(400).json({ error: `Only ${outstanding} outstanding ${outstanding === 1 ? 'copy remains' : 'copies remain'} on this checkout.` })
     }
     const [[book]] = await connection.execute(
       'SELECT total_copies FROM books WHERE id = ? FOR UPDATE',
       [loan.bookId],
     )
-    if (!book || Number(book.total_copies) < 1) {
+    const missedQuantity = Number(loan.missedQuantity) + quantity
+    const complete = Number(loan.returnedQuantity) + missedQuantity === Number(loan.quantity)
+    if (!book || Number(book.total_copies) < quantity) {
       await connection.rollback()
       return res.status(409).json({ error: 'The catalog copy count cannot be reduced for this loan.' })
     }
-    await connection.execute('UPDATE loans SET missed_at = CURRENT_TIMESTAMP WHERE id = ?', [loan.id])
-    await connection.execute('UPDATE books SET total_copies = total_copies - 1 WHERE id = ?', [loan.bookId])
-    await audit(connection, req.user.name, 'Book marked missed', `"${loan.title}" marked missed by ${loan.memberName}; one copy removed from the catalog`)
+    await connection.execute(
+      `UPDATE loans SET missed_quantity = ?, missed_at = COALESCE(missed_at, CURRENT_TIMESTAMP),
+       returned_at = ${complete ? 'NULL' : 'returned_at'} WHERE id = ?`,
+      [missedQuantity, loan.id],
+    )
+    await connection.execute('UPDATE books SET total_copies = total_copies - ? WHERE id = ?', [quantity, loan.bookId])
+    await audit(connection, req.user.name, 'Book marked missed', `${quantity} ${loan.title} ${quantity === 1 ? 'copy' : 'copies'} marked missed by ${loan.memberName}; removed from inventory`)
     await connection.commit()
-    res.json({ message: 'Book marked as missed; one copy was removed from the catalog.' })
+    res.json({ message: `${quantity} ${quantity === 1 ? 'copy' : 'copies'} marked missed and removed from the catalog.`, missedQuantity, outstandingQuantity: outstanding - quantity })
   } catch (error) {
     await connection.rollback()
     throw error
@@ -1290,7 +1339,8 @@ app.get('/api/export/reports.csv', ...staff, asyncRoute(async (req, res) => {
   )
   const columns = [
     'issuedAt', 'memberName', 'membershipNumber', 'memberType', 'classSection',
-    'email', 'bookTitle', 'isbn', 'copyCode', 'dueDate', 'returnedAt', 'missedAt', 'status',
+    'email', 'bookTitle', 'isbn', 'copyCode', 'quantity', 'returnedQuantity',
+    'missedQuantity', 'outstandingQuantity', 'dueDate', 'returnedAt', 'missedAt', 'status',
   ]
   res.type('text/csv').attachment('gs-busanza-library-report.csv').send(csvDocument(columns, rows))
 }))

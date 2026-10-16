@@ -96,7 +96,7 @@ This changes the single librarian account's username and bcrypt password without
 - Edit member details and, for administrators, delete members that have no loan or attendance history
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
 - Name, membership-number, class, and member-type search and filters
-- Book checkout with an optional physical copy/accession code, student/teacher loan limits (1/300 active books), return, and overdue tracking
+- Book checkout with an optional physical copy/accession code, quantity checkout for teachers (up to 300 active copies), a one-book student limit, partial returns, partial missed-copy tracking, and overdue tracking
 - Daily library attendance for students and teachers, optional reading-book records, frequent-visitor rankings, and date-based CSV export
 - Borrower counts and filtered circulation/class reports
 - Audit history for library actions
@@ -132,11 +132,11 @@ The title and total copy count are required. ISBN, publisher, author, delivery d
 
 The header includes a sun/moon button to switch between light and dark themes. Your choice is saved in this browser.
 
-At checkout, each student may have at most **1 active book** at a time and each teacher at most **300 active books**. The API enforces these limits as well as the checkout form.
+At checkout, each student may have at most **1 active book** at a time. Teachers can check out several copies of one title in a single record, up to **300 active copies** across all titles. Returns and missed-book processing can be applied to part of a multi-copy checkout; returned copies increase available inventory and missed copies reduce total inventory.
 
-If a checked-out book is lost, use **Loans & returns → Mark missed**. Confirming this closes the loan, reduces the book title's total inventory by one without increasing available copies, and records who had the book. Missed loans appear in the **Missed books** report and can be filtered by name, class, book, and date, then downloaded as CSV, PDF, or Excel.
+If checked-out copies are lost, use **Loans & returns → Mark missed** and enter the number of copies. This reduces the book title's total inventory by that number without increasing available copies and records who had them. Missed copies appear in the **Missed books** report and can be filtered by name, class, book, and date, then downloaded as CSV, PDF, or Excel. Loan lists and reports show quantities issued, returned, missed, and still outstanding.
 
-When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and the same code cannot be used on another unreturned loan until the copy is returned.
+When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and the same code cannot be used on another checkout while its loan still has outstanding copies.
 
 ### Automatic email and WhatsApp notifications
 
@@ -150,7 +150,7 @@ Before deploying school-directory or book catalog changes to an existing databas
 npm.cmd run db:migrate:directory
 ```
 
-It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code and missed-book tracking to loan records, creates the library attendance table, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
+It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code and missed-book/quantity tracking to loan records, creates the library attendance table, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
 For a deployed Vercel database, an authenticated Librarian or Administrator can apply the same idempotent migration with `POST /api/admin/migrations/school-directory` and a Bearer token.
 
 ## Other commands

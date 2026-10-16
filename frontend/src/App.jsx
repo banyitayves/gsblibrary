@@ -55,23 +55,23 @@ const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,
 const reportDefinitions = {
   loans: {
     title: 'Loan activity',
-    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Email', 'email'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Returned', 'returnedAt'], ['Missed', 'missedAt'], ['Status', 'status']],
+    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Email', 'email'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Quantity', 'quantity'], ['Returned copies', 'returnedQuantity'], ['Missed copies', 'missedQuantity'], ['Outstanding copies', 'outstandingQuantity'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Returned', 'returnedAt'], ['Missed', 'missedAt'], ['Status', 'status']],
   },
   overdue: {
     title: 'Overdue loans',
-    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Status', 'status']],
+    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Quantity', 'quantity'], ['Returned copies', 'returnedQuantity'], ['Missed copies', 'missedQuantity'], ['Outstanding copies', 'outstandingQuantity'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Status', 'status']],
   },
   returned: {
     title: 'Returned-loan history',
-    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Returned', 'returnedAt'], ['Status', 'status']],
+    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Quantity', 'quantity'], ['Returned copies', 'returnedQuantity'], ['Missed copies', 'missedQuantity'], ['Outstanding copies', 'outstandingQuantity'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Returned', 'returnedAt'], ['Status', 'status']],
   },
   missed: {
     title: 'Missed books',
-    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Marked missed', 'missedAt'], ['Status', 'status']],
+    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Quantity', 'quantity'], ['Returned copies', 'returnedQuantity'], ['Missed copies', 'missedQuantity'], ['Outstanding copies', 'outstandingQuantity'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Marked missed', 'missedAt'], ['Status', 'status']],
   },
   people: {
     title: 'Student and teacher borrowing',
-    columns: [['Name', 'name'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Membership number', 'membershipNumber'], ['Email', 'email'], ['Phone', 'phone'], ['Status', 'status'], ['Total loans', 'totalLoans'], ['Active loans', 'activeLoans'], ['Overdue loans', 'overdueLoans']],
+    columns: [['Name', 'name'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Membership number', 'membershipNumber'], ['Email', 'email'], ['Phone', 'phone'], ['Status', 'status'], ['Total copies borrowed', 'totalLoans'], ['Active copies', 'activeLoans'], ['Overdue copies', 'overdueLoans']],
   },
   nonBorrowers: {
     title: 'Members who have never borrowed',
@@ -79,7 +79,7 @@ const reportDefinitions = {
   },
   classes: {
     title: 'Class borrowing summary',
-    columns: [['Class', 'classSection'], ['Students', 'students'], ['Total loans', 'totalLoans'], ['Active loans', 'activeLoans'], ['Overdue loans', 'overdueLoans']],
+    columns: [['Class', 'classSection'], ['Students', 'students'], ['Total copies borrowed', 'totalLoans'], ['Active copies', 'activeLoans'], ['Overdue copies', 'overdueLoans']],
   },
   popular: {
     title: 'Most-borrowed books',
@@ -131,7 +131,8 @@ function App() {
   const [modal, setModal] = useState(null)
   const [bookForm, setBookForm] = useState(initialBook)
   const [memberForm, setMemberForm] = useState({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
-  const [loanForm, setLoanForm] = useState({ bookId: '', memberId: '', dueDate: '', copyCode: '' })
+  const [loanForm, setLoanForm] = useState({ bookId: '', memberId: '', quantity: '1', dueDate: '', copyCode: '' })
+  const [loanActionQuantity, setLoanActionQuantity] = useState('1')
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const [busy, setBusy] = useState(false)
   const [darkMode, setDarkMode] = useState(() => {
@@ -319,11 +320,11 @@ function App() {
     try {
       await api('/loans', {
         method: 'POST',
-        body: JSON.stringify({ ...loanForm, bookId: Number(loanForm.bookId), memberId: Number(loanForm.memberId) }),
+        body: JSON.stringify({ ...loanForm, bookId: Number(loanForm.bookId), memberId: Number(loanForm.memberId), quantity: Number(loanForm.quantity) }),
       })
       setModal(null)
-      setLoanForm({ bookId: '', memberId: '', dueDate: '', copyCode: '' })
-      notify('Book checked out successfully.')
+      setLoanForm({ bookId: '', memberId: '', quantity: '1', dueDate: '', copyCode: '' })
+      notify(`${loanForm.quantity} ${Number(loanForm.quantity) === 1 ? 'copy' : 'copies'} checked out successfully.`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -332,26 +333,26 @@ function App() {
     }
   }
 
-  async function returnLoan(loan) {
-    if (!window.confirm(`Are you sure you want to mark “${loan.bookTitle}” returned by ${loan.memberName}?`)) return
-    setBusy(true)
-    try {
-      await api(`/loans/${loan.id}/return`, { method: 'POST' })
-      notify(`“${loan.bookTitle}” has been returned.`)
-      await loadData()
-    } catch (error) {
-      notify(error.message)
-    } finally {
-      setBusy(false)
-    }
+  function openLoanAction(action, loan) {
+    setLoanActionQuantity('1')
+    setModal({ type: 'loanAction', action, loan })
   }
 
-  async function markLoanMissed(loan) {
-    if (!window.confirm(`Mark the copy of “${loan.bookTitle}” borrowed by ${loan.memberName} as missed? One copy will be removed from the book's total inventory.`)) return
+  async function saveLoanAction(event) {
+    event.preventDefault()
+    const { action, loan } = modal
+    const quantity = Number(loanActionQuantity)
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > Number(loan.outstandingQuantity)) {
+      notify(`Enter a quantity from 1 to ${loan.outstandingQuantity}.`)
+      return
+    }
     setBusy(true)
     try {
-      await api(`/loans/${loan.id}/missed`, { method: 'POST' })
-      notify(`“${loan.bookTitle}” was marked missed and removed from inventory.`)
+      await api(`/loans/${loan.id}/${action}`, { method: 'POST', body: JSON.stringify({ quantity }) })
+      setModal(null)
+      notify(action === 'return'
+        ? `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of “${loan.bookTitle}” returned.`
+        : `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of “${loan.bookTitle}” marked missed.`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -591,7 +592,10 @@ function App() {
   const canManageLibraryData = ['Administrator', 'Librarian'].includes(user.role)
   const availableBooks = books.filter((book) => book.availableCopies > 0)
   const selectedLoanMember = members.find((member) => String(member.id) === loanForm.memberId)
+  const selectedLoanBook = books.find((book) => String(book.id) === loanForm.bookId)
   const selectedMemberLimit = selectedLoanMember?.memberType === 'Teacher' ? 300 : 1
+  const selectedMemberRemaining = selectedLoanMember ? selectedMemberLimit - Number(selectedLoanMember.activeLoans || 0) : 1
+  const checkoutQuantityLimit = Math.max(0, Math.min(Number(selectedLoanBook?.availableCopies || 0), selectedMemberRemaining))
 
   return (
     <div className="min-h-screen bg-[#f7f8f5] text-[#1d302b]">
@@ -730,8 +734,8 @@ function App() {
               filter={loanFilter}
               setFilter={setLoanFilter}
               onIssue={() => setModal({ type: 'loan' })}
-              onReturn={returnLoan}
-              onMissed={markLoanMissed}
+              onReturn={(loan) => openLoanAction('return', loan)}
+              onMissed={(loan) => openLoanAction('missed', loan)}
               busy={busy}
             />
           )}
@@ -812,27 +816,54 @@ function App() {
           ) : (
             <form className="space-y-4" onSubmit={issueLoan}>
               <Field label="Book">
-                <select required value={loanForm.bookId} onChange={(event) => setLoanForm({ ...loanForm, bookId: event.target.value })}>
+                <select required value={loanForm.bookId} onChange={(event) => {
+                  const book = availableBooks.find((item) => String(item.id) === event.target.value)
+                  setLoanForm({ ...loanForm, bookId: event.target.value, quantity: String(Math.max(1, Math.min(Number(loanForm.quantity) || 1, Number(book?.availableCopies || 1)))) })
+                }}>
                   <option value="">Choose a book</option>
                   {availableBooks.map((book) => <option key={book.id} value={book.id}>{book.title} · {book.availableCopies} available</option>)}
                 </select>
               </Field>
               <Field label="Member">
-                <select required value={loanForm.memberId} onChange={(event) => setLoanForm({ ...loanForm, memberId: event.target.value })}>
+                <select required value={loanForm.memberId} onChange={(event) => setLoanForm({ ...loanForm, memberId: event.target.value, quantity: '1' })}>
                   <option value="">Choose a member</option>
                   {members.filter((member) => member.status === 'Active').map((member) => {
                     const limit = member.memberType === 'Teacher' ? 300 : 1
                     const atLimit = Number(member.activeLoans || 0) >= limit
-                    return <option key={member.id} value={member.id} disabled={atLimit}>{member.name} · {member.activeLoans || 0}/{limit} books{atLimit ? ' · limit reached' : ''}</option>
+                    return <option key={member.id} value={member.id} disabled={atLimit}>{member.name} · {member.activeLoans || 0}/{limit} copies{atLimit ? ' · limit reached' : ''}</option>
                   })}
                 </select>
               </Field>
-              {selectedLoanMember && <p className="rounded-lg bg-[#f3f6f1] px-3 py-2 text-[11px] text-[#607667]">{selectedLoanMember.memberType} checkout limit: {selectedLoanMember.activeLoans || 0} of {selectedMemberLimit} active book(s).</p>}
+              {selectedLoanMember?.memberType === 'Teacher' && (
+                <Field label="Number of copies">
+                  <input required type="number" min="1" max={checkoutQuantityLimit} value={loanForm.quantity} onChange={(event) => setLoanForm({ ...loanForm, quantity: event.target.value })} />
+                </Field>
+              )}
+              {selectedLoanMember && <p className="rounded-lg bg-[#f3f6f1] px-3 py-2 text-[11px] text-[#607667]">{selectedLoanMember.memberType === 'Teacher' ? `Teacher limit: ${selectedLoanMember.activeLoans || 0} of 300 active copies; ${selectedLoanBook?.availableCopies || 0} copies available for this title.` : 'Students may check out one book at a time.'}</p>}
               <Field label="Code inside this physical book (optional)"><input maxLength="64" autoComplete="off" value={loanForm.copyCode} onChange={(event) => setLoanForm({ ...loanForm, copyCode: event.target.value })} placeholder="Enter the book's copy / accession code" /></Field>
               <Field label="Due date"><input required type="date" min={today()} value={loanForm.dueDate} onChange={(event) => setLoanForm({ ...loanForm, dueDate: event.target.value })} /></Field>
               <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Check out book" />
             </form>
           )}
+        </Modal>
+      )}
+
+      {modal?.type === 'loanAction' && (
+        <Modal
+          title={modal.action === 'return' ? 'Return book copies' : 'Mark book copies missed'}
+          subtitle={modal.action === 'return' ? 'Confirm how many copies are being returned.' : 'Missed copies will be removed from the catalog inventory.'}
+          onClose={() => setModal(null)}
+        >
+          <form className="space-y-4" onSubmit={saveLoanAction}>
+            <div className="rounded-xl bg-[#f7f8f5] p-4 text-[11px] leading-relaxed text-[#748078]">
+              <p className="font-bold text-[#46584b]">{modal.loan.bookTitle}</p>
+              <p className="mt-1">{modal.loan.memberName} · {modal.loan.outstandingQuantity} outstanding {Number(modal.loan.outstandingQuantity) === 1 ? 'copy' : 'copies'}</p>
+            </div>
+            <Field label={`Number of copies to ${modal.action === 'return' ? 'return' : 'mark missed'}`}>
+              <input autoFocus required type="number" min="1" max={modal.loan.outstandingQuantity} value={loanActionQuantity} onChange={(event) => setLoanActionQuantity(event.target.value)} />
+            </Field>
+            <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel={modal.action === 'return' ? 'Confirm return' : 'Confirm missed copies'} />
+          </form>
         </Modal>
       )}
 
@@ -1146,18 +1177,18 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
         {kind === 'loans' && <>
         <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
           {[
-            ['All loans', readyReport.summary.totalLoans],
-            ['Active', readyReport.summary.activeLoans],
-            ['Overdue', readyReport.summary.overdueLoans],
-            ['Returned', readyReport.summary.returnedLoans],
-            ['Missed books', readyReport.summary.missedLoans],
-            ['Student loans', readyReport.summary.studentLoans],
-            ['Teacher loans', readyReport.summary.teacherLoans],
+            ['Total copies loaned', readyReport.summary.totalLoans],
+            ['Active copies', readyReport.summary.activeLoans],
+            ['Overdue copies', readyReport.summary.overdueLoans],
+            ['Returned copies', readyReport.summary.returnedLoans],
+            ['Missed copies', readyReport.summary.missedLoans],
+            ['Student copies', readyReport.summary.studentLoans],
+            ['Teacher copies', readyReport.summary.teacherLoans],
           ].map(([label, value]) => <article key={label} className="rounded-2xl border border-[#e9ede7] bg-white p-4"><p className="text-[10px] font-semibold text-[#7c887f]">{label}</p><p className="mt-2 text-2xl font-bold">{Number(value).toLocaleString()}</p></article>)}
         </section>
         <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
           <div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Loan activity</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.rows.length.toLocaleString()} records{readyReport.truncated ? ' (showing first 20,000; narrow filters to view fewer)' : ''}</p></div>
-          <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase tracking-wide text-[#929d94]"><tr><th className="px-5 py-3">Borrower</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Book / copy code</th><th className="px-4 py-3">Out / due</th><th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.rows.map((row) => <tr key={row.id}><td className="px-5 py-3"><span className="font-bold">{row.memberName}</span><span className="ml-2 text-[#929d94]">{row.membershipNumber}</span></td><td className="px-4 py-3">{row.memberType} · {row.classSection || '—'}</td><td className="px-4 py-3">{row.bookTitle}<p className="mt-1 text-[#929d94]">{row.copyCode || 'No copy code'} · ISBN {row.isbn}</p></td><td className="px-4 py-3">{row.issuedAt} / {row.dueDate}</td><td className="px-5 py-3">{row.status}</td></tr>)}{readyReport.rows.length === 0 && <EmptyRow colSpan={5} message="No loan records match these filters." />}</tbody></table></div>
+          <div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase tracking-wide text-[#929d94]"><tr><th className="px-5 py-3">Borrower</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Book / copy code</th><th className="px-4 py-3">Out / due</th><th className="px-4 py-3">Copies: total / returned / missed / out</th><th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.rows.map((row) => <tr key={row.id}><td className="px-5 py-3"><span className="font-bold">{row.memberName}</span><span className="ml-2 text-[#929d94]">{row.membershipNumber}</span></td><td className="px-4 py-3">{row.memberType} · {row.classSection || '—'}</td><td className="px-4 py-3">{row.bookTitle}<p className="mt-1 text-[#929d94]">{row.copyCode || 'No copy code'} · ISBN {row.isbn || '—'}</p></td><td className="px-4 py-3">{row.issuedAt} / {row.dueDate}</td><td className="px-4 py-3">{row.quantity} / {row.returnedQuantity} / {row.missedQuantity} / {row.outstandingQuantity}</td><td className="px-5 py-3">{row.status}</td></tr>)}{readyReport.rows.length === 0 && <EmptyRow colSpan={6} message="No loan records match these filters." />}</tbody></table></div>
         </section>
         </>}
         {kind === 'people' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Student & teacher borrowing</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} people</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Name</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Membership</th><th className="px-4 py-3">Total loans</th><th className="px-5 py-3">Active / overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((person) => <tr key={person.id}><td className="px-5 py-3 font-bold">{person.name}</td><td className="px-4 py-3">{person.memberType} · {person.classSection || '—'}</td><td className="px-4 py-3">{person.membershipNumber}</td><td className="px-4 py-3">{person.totalLoans}</td><td className="px-5 py-3">{person.activeLoans} / {person.overdueLoans}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No borrowers match these filters." />}</tbody></table></div></section>}
@@ -1289,11 +1320,11 @@ function Loans({ loans, filter, setFilter, onIssue, onReturn, onMissed, busy }) 
           <span className="text-[10px] text-[#929d94]">{loans.length} {loans.length === 1 ? 'record' : 'records'}</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left">
-            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Book</th><th className="px-4 py-3.5">Member</th><th className="px-4 py-3.5">Checked out</th><th className="px-4 py-3.5">Due date</th><th className="px-4 py-3.5">Status</th><th className="px-5 py-3.5 text-right">Action</th></tr></thead>
+          <table className="w-full min-w-[780px] text-left">
+            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Book</th><th className="px-4 py-3.5">Member</th><th className="px-4 py-3.5">Checked out</th><th className="px-4 py-3.5">Due date</th><th className="px-4 py-3.5">Status & copies</th><th className="px-5 py-3.5 text-right">Action</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
               {loans.map((loan, index) => {
-                const active = loan.status === 'Active' || loan.status === 'Overdue'
+                const active = Number(loan.outstandingQuantity) > 0
                 const statusClass = loan.status === 'Returned'
                   ? 'bg-[#f1f2ef] text-[#858f87]'
                   : loan.status === 'Missed'
@@ -1301,7 +1332,7 @@ function Loans({ loans, filter, setFilter, onIssue, onReturn, onMissed, busy }) 
                     : loan.status === 'Overdue'
                       ? 'bg-[#f9eee9] text-[#b46d53]'
                       : 'bg-[#edf4ed] text-[#64846b]'
-                return <tr key={loan.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="text-[11px] font-bold">{loan.bookTitle}</p><p className="mt-1 text-[9px] text-[#929d94]">ISBN {loan.isbn} · Copy {loan.copyCode || 'not recorded'}</p></div></div></td><td className="px-4 py-4"><p className="text-[10px] font-semibold">{loan.memberName}</p><p className="mt-1 text-[9px] text-[#929d94]">{loan.membershipNumber}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.issuedAt}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.dueDate}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${statusClass}`}>{loan.status}</span></td><td className="space-x-1 px-5 py-4 text-right">{active && <><button disabled={busy} onClick={() => onMissed(loan)} className="rounded-lg bg-[#f8e8e4] px-3 py-2 text-[10px] font-bold text-[#a34d37] hover:bg-[#f2d9d2] disabled:opacity-50">Mark missed</button><button disabled={busy} onClick={() => onReturn(loan)} className="rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Mark returned</button></>}{!active && <span className="text-[10px] text-[#a0aaa2]">{loan.status === 'Missed' ? 'Marked missed' : <>All done <Check className="ml-1 inline" size={12} /></>}</span>}</td></tr>
+                return <tr key={loan.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="text-[11px] font-bold">{loan.bookTitle}</p><p className="mt-1 text-[9px] text-[#929d94]">ISBN {loan.isbn || 'not recorded'} · Copy {loan.copyCode || 'not recorded'}</p></div></div></td><td className="px-4 py-4"><p className="text-[10px] font-semibold">{loan.memberName}</p><p className="mt-1 text-[9px] text-[#929d94]">{loan.membershipNumber}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.issuedAt}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.dueDate}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${statusClass}`}>{loan.status}</span><p className="mt-1.5 whitespace-nowrap text-[9px] text-[#929d94]">{loan.outstandingQuantity} out · {loan.returnedQuantity} returned · {loan.missedQuantity} missed</p></td><td className="space-x-1 px-5 py-4 text-right">{active && <><button disabled={busy} onClick={() => onMissed(loan)} className="rounded-lg bg-[#f8e8e4] px-3 py-2 text-[10px] font-bold text-[#a34d37] hover:bg-[#f2d9d2] disabled:opacity-50">Mark missed</button><button disabled={busy} onClick={() => onReturn(loan)} className="rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Mark returned</button></>}{!active && <span className="text-[10px] text-[#a0aaa2]">{loan.status === 'Missed' ? 'Marked missed' : <>All done <Check className="ml-1 inline" size={12} /></>}</span>}</td></tr>
               })}
               {loans.length === 0 && <EmptyRow colSpan={6} message={filter === 'All' ? 'No loans yet. Check out a book to get started.' : `No ${filter.toLowerCase()} loans right now.`} />}
             </tbody>
