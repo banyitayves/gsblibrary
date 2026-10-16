@@ -8,6 +8,7 @@ import { config, requireJwtSecret } from './config.js'
 import { authenticate, allowRoles } from './auth.js'
 import { pool } from './db.js'
 import { csvDocument, parseCsv } from './csv.js'
+import { migrateSchoolDirectory } from './migrations.js'
 
 const app = express()
 const staff = [authenticate]
@@ -187,6 +188,17 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
 }))
 
 app.get('/api/auth/me', ...staff, (_req, res) => res.json({ user: _req.user }))
+
+app.post('/api/admin/migrations/school-directory', ...canManage, asyncRoute(async (req, res) => {
+  const connection = await pool.getConnection()
+  try {
+    await migrateSchoolDirectory(connection)
+    await audit(connection, req.user.name, 'School directory migration applied', 'Updated member fields for student and teacher records')
+    res.json({ message: 'The GS Busanza school directory database migration is complete.' })
+  } finally {
+    connection.release()
+  }
+}))
 
 app.post('/api/auth/change-credentials', ...staff, asyncRoute(async (req, res) => {
   const currentPassword = String(req.body?.currentPassword || '')

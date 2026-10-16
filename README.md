@@ -118,7 +118,8 @@ Before deploying these directory features to an existing database, run the idemp
 npm.cmd run db:migrate:directory
 ```
 
-It makes member email optional, adds member type and class fields/indexes, and updates the `librarian@library.local` display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
+It makes member email optional, adds member type and class fields/indexes, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
+For a deployed Vercel database, an authenticated Librarian or Administrator can apply the same idempotent migration with `POST /api/admin/migrations/school-directory` and a Bearer token.
 
 ## Other commands
 

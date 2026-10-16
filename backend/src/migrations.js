@@ -32,7 +32,7 @@ export async function migrateSchoolDirectory(connection) {
     await connection.query('CREATE INDEX idx_members_type ON members (member_type)')
   }
   await connection.execute(
-    `UPDATE users SET name = ? WHERE email = ? AND name <> ?`,
-    ['NSHIMIYIMANA Yves', 'librarian@library.local', 'NSHIMIYIMANA Yves'],
+    `UPDATE users SET name = ? WHERE role = 'Librarian' AND name <> ?`,
+    ['NSHIMIYIMANA Yves', 'NSHIMIYIMANA Yves'],
   )
 }
