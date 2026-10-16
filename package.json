@@ -13,6 +13,7 @@
     "lint": "npm run lint --workspace=frontend",
     "db:bootstrap": "npm run db:bootstrap --workspace=backend",
     "db:setup": "npm run db:setup --workspace=backend",
+    "db:migrate:directory": "npm run db:migrate:directory --workspace=backend",
     "start": "npm run start --workspace=backend"
   },
   "devDependencies": {

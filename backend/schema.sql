@@ -27,10 +27,14 @@ CREATE TABLE IF NOT EXISTS members (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   membership_number VARCHAR(32) NOT NULL UNIQUE,
   name VARCHAR(120) NOT NULL,
-  email VARCHAR(190) NOT NULL UNIQUE,
+  email VARCHAR(190) NULL UNIQUE,
+  member_type ENUM('Student', 'Teacher') NOT NULL DEFAULT 'Student',
+  class_section VARCHAR(20) NULL,
   status ENUM('Active', 'Suspended') NOT NULL DEFAULT 'Active',
   joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_members_name (name)
+  INDEX idx_members_name (name),
+  INDEX idx_members_class_section (class_section),
+  INDEX idx_members_type (member_type)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS loans (

@@ -11,6 +11,7 @@ import {
   CircleHelp,
   Clock3,
   Download,
+  FileBarChart,
   LayoutDashboard,
   LibraryBig,
   LogOut,
@@ -18,16 +19,26 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Upload,
   UsersRound,
   X,
 } from 'lucide-react'
 import { api } from './api.js'
 
+const schoolClasses = [
+  'S1A', 'S1B', 'S1C', 'S1D', 'S1E', 'S1F',
+  'S2A', 'S2B', 'S2C', 'S2D',
+  'S3A', 'S3B', 'S3C', 'S3D',
+  'S4LANG', 'S4ARTS', 'S4MS2',
+  'S5LANG', 'S5ARTS', 'S5MS2',
+  'S6LFK', 'S6HGL', 'S6MCE',
+]
 const navigation = [
   { id: 'Dashboard', label: 'Overview', icon: LayoutDashboard },
   { id: 'Catalog', label: 'Book collection', icon: LibraryBig },
-  { id: 'Members', label: 'Members', icon: UsersRound },
+  { id: 'Members', label: 'Students & teachers', icon: UsersRound },
   { id: 'Loans', label: 'Loans & returns', icon: Bookmark },
+  { id: 'Reports', label: 'Reports', icon: FileBarChart },
 ]
 
 const initialBook = { isbn: '', title: '', author: '', category: '', shelf: '', totalCopies: 1, publishedOn: '' }
@@ -35,6 +46,7 @@ const today = () => {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
+const memberCsvHeaders = 'name,member_type,class_section,membership_number,email'
 const userFromSession = () => {
   try {
     return JSON.parse(sessionStorage.getItem('libraryflow-user') || 'null')
@@ -56,10 +68,16 @@ function App() {
   const [loans, setLoans] = useState([])
   const [activity, setActivity] = useState([])
   const [search, setSearch] = useState('')
+  const [memberTypeFilter, setMemberTypeFilter] = useState('All')
+  const [classFilter, setClassFilter] = useState('All')
   const [loanFilter, setLoanFilter] = useState('All')
+  const [reportData, setReportData] = useState(null)
+  const [classReport, setClassReport] = useState([])
+  const [reportFilters, setReportFilters] = useState({ search: '', memberType: 'All', classSection: 'All', status: 'All', from: '', to: '' })
+  const [importResult, setImportResult] = useState(null)
   const [modal, setModal] = useState(null)
   const [bookForm, setBookForm] = useState(initialBook)
-  const [memberForm, setMemberForm] = useState({ name: '', email: '' })
+  const [memberForm, setMemberForm] = useState({ name: '', email: '', memberType: 'Student', classSection: 'S1A' })
   const [loanForm, setLoanForm] = useState({ bookId: '', memberId: '', dueDate: '' })
   const [loginForm, setLoginForm] = useState({ email: 'admin@library.local', password: 'admin123' })
   const [busy, setBusy] = useState(false)
@@ -116,13 +134,18 @@ function App() {
   const filteredMembers = useMemo(() => {
     const term = search.trim().toLowerCase()
     return members.filter((member) =>
-      [member.name, member.email, member.membershipNumber].join(' ').toLowerCase().includes(term),
+      (memberTypeFilter === 'All' || member.memberType === memberTypeFilter)
+      && (classFilter === 'All' || member.classSection === classFilter)
+      && [member.name, member.email, member.membershipNumber, member.classSection].join(' ').toLowerCase().includes(term),
     )
-  }, [members, search])
+  }, [members, search, memberTypeFilter, classFilter])
 
   const filteredLoans = useMemo(
-    () => loans.filter((loan) => loanFilter === 'All' || loan.status === loanFilter),
-    [loans, loanFilter],
+    () => loans.filter((loan) =>
+      (loanFilter === 'All' || loan.status === loanFilter)
+      && [loan.memberName, loan.membershipNumber, loan.bookTitle].join(' ').toLowerCase().includes(search.trim().toLowerCase()),
+    ),
+    [loans, loanFilter, search],
   )
 
   async function handleLogin(event) {
@@ -175,7 +198,7 @@ function App() {
     try {
       await api('/members', { method: 'POST', body: JSON.stringify(memberForm) })
       setModal(null)
-      setMemberForm({ name: '', email: '' })
+      setMemberForm({ name: '', email: '', memberType: 'Student', classSection: 'S1A' })
       notify('New member registered.')
       await loadData()
     } catch (error) {
@@ -246,6 +269,64 @@ function App() {
       URL.revokeObjectURL(url)
     } catch (error) {
       notify(error.message)
+    }
+  }
+
+  async function importMembers(file, memberType) {
+    if (!file) return
+    setBusy(true)
+    try {
+      const result = await api(`/members/import?type=${memberType}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv' },
+        body: await file.text(),
+      })
+      setImportResult({ memberType, ...result })
+      notify(`Imported ${result.imported} ${memberType.toLowerCase()} record${result.imported === 1 ? '' : 's'}.`)
+      await loadData()
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function downloadCsv(path, filename) {
+    try {
+      const token = sessionStorage.getItem('libraryflow-token')
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api${path}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}))
+        throw new Error(result.error || `Export failed (${response.status}).`)
+      }
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      notify(error.message)
+    }
+  }
+
+  async function runReports(filters = reportFilters) {
+    setBusy(true)
+    try {
+      const params = new URLSearchParams()
+      for (const [key, value] of Object.entries(filters)) {
+        if (value && value !== 'All') params.set(key, value)
+      }
+      const report = await api(`/reports?${params}`)
+      const classes = await api(`/reports/classes?${new URLSearchParams(Object.fromEntries(['from', 'to'].filter((key) => filters[key]).map((key) => [key, filters[key]])))}`)
+      setReportData(report)
+      setClassReport(classes)
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -363,7 +444,15 @@ function App() {
               members={filteredMembers}
               search={search}
               setSearch={setSearch}
-              onAdd={() => setModal({ type: 'member' })}
+              typeFilter={memberTypeFilter}
+              setTypeFilter={setMemberTypeFilter}
+              classFilter={classFilter}
+              setClassFilter={setClassFilter}
+              importResult={importResult}
+              busy={busy}
+              onImport={importMembers}
+              onExport={() => downloadCsv('/export/members.csv', 'gs-busanza-members.csv')}
+              onAdd={() => { setMemberForm({ name: '', email: '', memberType: 'Student', classSection: 'S1A' }); setModal({ type: 'member' }) }}
             />
           )}
           {page === 'Loans' && (
@@ -374,6 +463,23 @@ function App() {
               onIssue={() => setModal({ type: 'loan' })}
               onReturn={returnLoan}
               busy={busy}
+            />
+          )}
+          {page === 'Reports' && (
+            <Reports
+              filters={reportFilters}
+              setFilters={setReportFilters}
+              report={reportData}
+              classes={classReport}
+              busy={busy}
+              onRun={() => runReports()}
+              onExport={() => {
+                const params = new URLSearchParams()
+                for (const [key, value] of Object.entries(reportFilters)) {
+                  if (value && value !== 'All') params.set(key, value)
+                }
+                void downloadCsv(`/export/reports.csv?${params}`, 'gs-busanza-library-report.csv')
+              }}
             />
           )}
         </main>
@@ -400,7 +506,11 @@ function App() {
         <Modal title="Add a member" subtitle="Create a library membership record." onClose={() => setModal(null)}>
           <form className="space-y-4" onSubmit={saveMember}>
             <Field label="Full name"><input required autoFocus value={memberForm.name} onChange={(event) => setMemberForm({ ...memberForm, name: event.target.value })} placeholder="Member name" /></Field>
-            <Field label="Email address"><input required type="email" value={memberForm.email} onChange={(event) => setMemberForm({ ...memberForm, email: event.target.value })} placeholder="name@example.com" /></Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Member type"><select value={memberForm.memberType} onChange={(event) => setMemberForm({ ...memberForm, memberType: event.target.value, classSection: event.target.value === 'Student' ? 'S1A' : '' })}><option>Student</option><option>Teacher</option></select></Field>
+              {memberForm.memberType === 'Student' && <Field label="Class"><select required value={memberForm.classSection} onChange={(event) => setMemberForm({ ...memberForm, classSection: event.target.value })}>{schoolClasses.map((section) => <option key={section}>{section}</option>)}</select></Field>}
+            </div>
+            <Field label="Email address (optional)"><input type="email" value={memberForm.email} onChange={(event) => setMemberForm({ ...memberForm, email: event.target.value })} placeholder="name@example.com" /></Field>
             <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Register member" />
           </form>
         </Modal>
@@ -441,10 +551,8 @@ function App() {
 function Brand({ compact = false }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="flex size-10 shrink-0 items-center justify-center rounded-[14px] bg-[#315c46] text-white shadow-sm">
-        <BookOpen size={20} strokeWidth={1.8} />
-      </div>
-      {!compact && <div><p className="text-[15px] font-extrabold tracking-[-.045em]">leaf &amp; lore</p><p className="mt-0.5 text-[10px] font-medium text-[#929d94]">Library workspace</p></div>}
+      <img src="/gs-busanza-crest.png" alt="GS Busanza crest" className="size-10 shrink-0 rounded-xl object-contain" />
+      {!compact && <div><p className="text-[15px] font-extrabold tracking-[-.045em]">GS Busanza</p><p className="mt-0.5 text-[10px] font-medium text-[#929d94]">School library · NSHIMIYIMANA Yves</p></div>}
     </div>
   )
 }
@@ -476,7 +584,7 @@ function Login({ form, setForm, onSubmit, busy, toast }) {
             <div><p className="text-[11px] font-semibold text-white">Made for your community</p><p className="mt-0.5 text-[10px] text-[#d0ddd1]/60">Every story starts somewhere</p></div>
           </div>
         </div>
-        <p className="relative text-[10px] text-white/45">Thoughtfully made for the people who keep stories moving.</p>
+        <p className="relative text-[10px] text-white/60">GS Busanza · Librarian: NSHIMIYIMANA Yves</p>
       </section>
       <section className="flex min-h-screen items-center justify-center px-6 py-12 sm:px-10">
         <div className="w-full max-w-[380px]">
@@ -623,24 +731,96 @@ function Catalog({ books, search, setSearch, onAdd, onEdit, onDelete, onExport, 
   )
 }
 
-function Members({ members, search, setSearch, onAdd }) {
+function Members({ members, search, setSearch, typeFilter, setTypeFilter, classFilter, setClassFilter, importResult, busy, onImport, onExport, onAdd }) {
   return (
     <>
-      <PageHeading eyebrow="Your reading community" title="Library members" description={`${members.length} lovely readers in your community`}>
+      <PageHeading eyebrow="GS Busanza school directory" title="Students & teachers" description={`${members.length} people match your directory filters`}>
         <SearchBox value={search} onChange={setSearch} placeholder="Search members…" />
-        <ActionButton onClick={onAdd}>Add a member</ActionButton>
+        <ActionButton secondary icon={Download} onClick={onExport}>Export CSV</ActionButton>
+        <ActionButton onClick={onAdd}><Plus size={14} /> Add person</ActionButton>
       </PageHeading>
+      <section className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-[#e9ede7] bg-white p-4">
+        <label className="text-[10px] font-semibold text-[#78847c]">Type <select className="ml-2 rounded-lg border border-[#e8ece6] bg-white px-2 py-2 text-[10px]" value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); if (event.target.value !== 'Student') setClassFilter('All') }}><option>All</option><option>Student</option><option>Teacher</option></select></label>
+        {typeFilter !== 'Teacher' && <label className="text-[10px] font-semibold text-[#78847c]">Class <select className="ml-2 rounded-lg border border-[#e8ece6] bg-white px-2 py-2 text-[10px]" value={classFilter} onChange={(event) => setClassFilter(event.target.value)}><option>All</option>{schoolClasses.map((section) => <option key={section}>{section}</option>)}</select></label>}
+        <div className="ml-auto flex flex-wrap gap-2">
+          <button onClick={() => downloadMemberTemplate('Student')} className="flex items-center gap-1.5 rounded-lg border border-[#e8ece6] px-3 py-2 text-[10px] font-bold text-[#607667] hover:bg-[#f7f8f5]"><Download size={13} /> Student CSV template</button>
+          <button onClick={() => downloadMemberTemplate('Teacher')} className="flex items-center gap-1.5 rounded-lg border border-[#e8ece6] px-3 py-2 text-[10px] font-bold text-[#607667] hover:bg-[#f7f8f5]"><Download size={13} /> Teacher CSV template</button>
+          <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+            <Upload size={13} /> Import students
+            <input type="file" accept=".csv,text/csv" className="sr-only" disabled={busy} onChange={(event) => { onImport(event.target.files?.[0], 'Student'); event.target.value = '' }} />
+          </label>
+          <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+            <Upload size={13} /> Import teachers
+            <input type="file" accept=".csv,text/csv" className="sr-only" disabled={busy} onChange={(event) => { onImport(event.target.files?.[0], 'Teacher'); event.target.value = '' }} />
+          </label>
+        </div>
+      </section>
+      {importResult && <section role="status" className="mb-4 rounded-xl border border-[#dce8dc] bg-[#f2f7f1] px-4 py-3 text-[11px] text-[#526c58]">
+        <p className="font-bold">{importResult.memberType} import: {importResult.imported} added, {importResult.skipped.length} duplicates skipped, {importResult.invalid.length} invalid rows.</p>
+        {[...importResult.skipped, ...importResult.invalid].slice(0, 5).map((row) => <p key={`${row.line}-${row.reason}`} className="mt-1">Row {row.line}: {row.reason}</p>)}
+      </section>}
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[600px] text-left">
-            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Member</th><th className="px-4 py-3.5">Membership no.</th><th className="px-4 py-3.5">Email address</th><th className="px-4 py-3.5">Joined</th><th className="px-5 py-3.5">Status</th></tr></thead>
+          <table className="w-full min-w-[780px] text-left">
+            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Student or teacher</th><th className="px-4 py-3.5">Type / class</th><th className="px-4 py-3.5">Membership no.</th><th className="px-4 py-3.5">Email</th><th className="px-4 py-3.5">Books out</th><th className="px-5 py-3.5">Status</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {members.map((member, index) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className={`flex size-9 items-center justify-center rounded-full text-[10px] font-bold ${['bg-[#edf2e9] text-[#6b846c]', 'bg-[#f2ede6] text-[#a17e5c]', 'bg-[#eeebf4] text-[#7e719a]', 'bg-[#f4ece8] text-[#a67762]'][index % 4]}`}>{initials(member.name)}</div><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">Library reader</p></div></div></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.joinedAt}</td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td></tr>)}
-              {members.length === 0 && <EmptyRow colSpan={5} message="No members found. Add a reader to get started." />}
+              {members.map((member, index) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className={`flex size-9 items-center justify-center rounded-full text-[10px] font-bold ${['bg-[#edf2e9] text-[#6b846c]', 'bg-[#f2ede6] text-[#a17e5c]', 'bg-[#eeebf4] text-[#7e719a]', 'bg-[#f4ece8] text-[#a67762]'][index % 4]}`}>{initials(member.name)}</div><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td><td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}</td><td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td></tr>)}
+              {members.length === 0 && <EmptyRow colSpan={6} message="No students or teachers match these filters. Import a CSV or add a person." />}
             </tbody>
           </table>
         </div>
       </section>
+    </>
+  )
+}
+
+function downloadMemberTemplate(memberType) {
+  const classSection = memberType === 'Teacher' ? '' : 'S1A'
+  const content = `${memberCsvHeaders}\nExample ${memberType.toLowerCase()},${memberType},${classSection},,\n`
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `gs-busanza-${memberType.toLowerCase()}-template.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function Reports({ filters, setFilters, report, classes, busy, onRun, onExport }) {
+  const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }))
+  return (
+    <>
+      <PageHeading eyebrow="Library activity at a glance" title="Reports" description="Search circulation, review class borrowing, and download records.">
+        <ActionButton secondary icon={Download} onClick={onExport} disabled={!report}>Export filtered CSV</ActionButton>
+        <ActionButton onClick={onRun} disabled={busy}>{busy ? 'Generating…' : 'Generate report'}</ActionButton>
+      </PageHeading>
+      <section className="mb-5 grid gap-3 rounded-2xl border border-[#e9ede7] bg-white p-5 sm:grid-cols-2 xl:grid-cols-3">
+        <Field label="Search people, membership no. or book"><input value={filters.search} onChange={(event) => update('search', event.target.value)} placeholder="Name, number, title or ISBN" /></Field>
+        <Field label="Member type"><select value={filters.memberType} onChange={(event) => update('memberType', event.target.value)}><option>All</option><option>Student</option><option>Teacher</option></select></Field>
+        <Field label="Class"><select value={filters.classSection} onChange={(event) => update('classSection', event.target.value)}><option>All</option>{schoolClasses.map((section) => <option key={section}>{section}</option>)}</select></Field>
+        <Field label="Loan status"><select value={filters.status} onChange={(event) => update('status', event.target.value)}><option>All</option><option>Active</option><option>Overdue</option><option>Returned</option></select></Field>
+        <Field label="From date"><input type="date" value={filters.from} onChange={(event) => update('from', event.target.value)} /></Field>
+        <Field label="To date"><input type="date" value={filters.to} onChange={(event) => update('to', event.target.value)} /></Field>
+      </section>
+      {!report ? <section className="rounded-2xl border border-dashed border-[#dfe6dd] bg-white p-10 text-center text-sm text-[#829087]">Choose your filters and generate a report.</section> : <>
+        <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          {[
+            ['All loans', report.summary.totalLoans],
+            ['Active', report.summary.activeLoans],
+            ['Overdue', report.summary.overdueLoans],
+            ['Returned', report.summary.returnedLoans],
+            ['Student loans', report.summary.studentLoans],
+            ['Teacher loans', report.summary.teacherLoans],
+          ].map(([label, value]) => <article key={label} className="rounded-2xl border border-[#e9ede7] bg-white p-4"><p className="text-[10px] font-semibold text-[#7c887f]">{label}</p><p className="mt-2 text-2xl font-bold">{Number(value).toLocaleString()}</p></article>)}
+        </section>
+        <section className="mb-5 overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
+          <div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Class borrowing summary</h2><p className="mt-1 text-[10px] text-[#929d94]">Student counts and loans for every GS Busanza class.</p></div>
+          <div className="overflow-x-auto"><table className="w-full min-w-[580px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase tracking-wide text-[#929d94]"><tr><th className="px-5 py-3">Class</th><th className="px-4 py-3">Students</th><th className="px-4 py-3">Loans</th><th className="px-4 py-3">Active</th><th className="px-5 py-3">Overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{classes.map((row) => <tr key={row.classSection}><td className="px-5 py-3 font-bold">{row.classSection}</td><td className="px-4 py-3">{row.students}</td><td className="px-4 py-3">{row.totalLoans}</td><td className="px-4 py-3">{row.activeLoans}</td><td className="px-5 py-3">{row.overdueLoans}</td></tr>)}</tbody></table></div>
+        </section>
+        <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
+          <div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Loan details</h2><p className="mt-1 text-[10px] text-[#929d94]">{report.rows.length.toLocaleString()} records{report.truncated ? ' (showing first 20,000; narrow filters to view fewer)' : ''}</p></div>
+          <div className="overflow-x-auto"><table className="w-full min-w-[880px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase tracking-wide text-[#929d94]"><tr><th className="px-5 py-3">Borrower</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Book</th><th className="px-4 py-3">Out / due</th><th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{report.rows.map((row) => <tr key={row.id}><td className="px-5 py-3"><span className="font-bold">{row.memberName}</span><span className="ml-2 text-[#929d94]">{row.membershipNumber}</span></td><td className="px-4 py-3">{row.memberType} · {row.classSection || '—'}</td><td className="px-4 py-3">{row.bookTitle}</td><td className="px-4 py-3">{row.issuedAt} / {row.dueDate}</td><td className="px-5 py-3">{row.status}</td></tr>)}{report.rows.length === 0 && <EmptyRow colSpan={5} message="No loan records match these filters." />}</tbody></table></div>
+        </section>
+      </>}
     </>
   )
 }

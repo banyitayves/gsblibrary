@@ -3,7 +3,7 @@ const API_URL = import.meta.env.VITE_API_URL || ''
 export async function api(path, options = {}) {
   const token = sessionStorage.getItem('libraryflow-token')
   const headers = new Headers(options.headers)
-  if (options.body && !(options.body instanceof FormData)) {
+  if (options.body && typeof options.body !== 'string' && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
   if (token) headers.set('Authorization', `Bearer ${token}`)

@@ -3,6 +3,7 @@ import { createConnection } from 'mysql2/promise'
 import bcrypt from 'bcryptjs'
 import { config } from './config.js'
 import { databaseSsl, pool } from './db.js'
+import { migrateSchoolDirectory } from './migrations.js'
 
 const demoBooks = [
   ['BK-1024', 'The Pragmatic Programmer', 'Andrew Hunt', 'Technology', 'A1-12', 5, '1999-10-20'],
@@ -61,7 +62,7 @@ async function seedDatabase(connection) {
     await connection.execute(
       `INSERT INTO users (name, email, password_hash, role)
        VALUES (?, ?, ?, 'Librarian')`,
-      ['Nora James', 'librarian@library.local', librarianHash],
+      ['NSHIMIYIMANA Yves', 'librarian@library.local', librarianHash],
     )
   }
 
@@ -105,7 +106,7 @@ async function seedDatabase(connection) {
   if (Number(auditCount) === 0) {
     await connection.execute(
       `INSERT INTO audit_logs (actor, action, details) VALUES
-       ('Nora James', 'Catalog prepared', 'Sample titles added to the library catalog'),
+       ('NSHIMIYIMANA Yves', 'Catalog prepared', 'Sample titles added to the library catalog'),
        ('Aisha Khan', 'Library opened', 'LibraryFlow is ready to use')`,
     )
   }
@@ -141,6 +142,7 @@ async function setupDatabase() {
     for (const statement of schema.split(';').map((sql) => sql.trim()).filter(Boolean)) {
       await connection.query(statement)
     }
+    await migrateSchoolDirectory(connection)
     await seedDatabase(connection)
   } finally {
     connection.release()
