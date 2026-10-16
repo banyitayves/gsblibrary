@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS loans (
   copy_code VARCHAR(64) NULL,
   INDEX idx_loans_due_date (due_date),
   INDEX idx_loans_member (member_id),
-  INDEX idx_loans_copy_code (copy_code, returned_at),
+  INDEX idx_loans_book_copy_code (book_id, copy_code, returned_at),
   CONSTRAINT fk_loans_book FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE RESTRICT,
   CONSTRAINT fk_loans_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;

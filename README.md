@@ -134,7 +134,7 @@ The header includes a sun/moon button to switch between light and dark themes. Y
 
 At checkout, each student may have at most **1 active book** at a time and each teacher at most **300 active books**. The API enforces these limits as well as the checkout form.
 
-When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and a code already on an unreturned loan cannot be checked out again until that copy is returned.
+When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports. A code cannot be checked out again while that same code for the same title is on an unreturned loan; different titles may use the same code.
 
 ### Automatic email and WhatsApp notifications
 

@@ -90,6 +90,9 @@ export async function migrateSchoolDirectory(connection) {
   if (!loanIndexes.some((index) => index.INDEX_NAME === 'idx_loans_copy_code')) {
     await connection.query('CREATE INDEX idx_loans_copy_code ON loans (copy_code, returned_at)')
   }
+  if (!loanIndexes.some((index) => index.INDEX_NAME === 'idx_loans_book_copy_code')) {
+    await connection.query('CREATE INDEX idx_loans_book_copy_code ON loans (book_id, copy_code, returned_at)')
+  }
   await connection.execute(
     `UPDATE users SET name = ? WHERE role = 'Librarian' AND name <> ?`,
     ['NSHIMIYIMANA Yves', 'NSHIMIYIMANA Yves'],
