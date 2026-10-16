@@ -448,17 +448,31 @@ app.put('/api/books/:id', ...canManage, asyncRoute(async (req, res) => {
   }
 }))
 
-app.delete('/api/books/:id', ...canAdminister, asyncRoute(async (req, res) => {
+app.delete('/api/books/:id', ...canManage, asyncRoute(async (req, res) => {
+  const bookId = Number(req.params.id)
+  if (!Number.isSafeInteger(bookId) || bookId < 1) {
+    return res.status(400).json({ error: 'Book ID must be a positive integer.' })
+  }
+  const connection = await pool.getConnection()
   try {
-    const [result] = await pool.execute('DELETE FROM books WHERE id = ?', [req.params.id])
-    if (!result.affectedRows) return res.status(404).json({ error: 'Book not found.' })
-    await audit(pool, req.user.name, 'Book removed', `Removed book #${req.params.id} from the catalog`)
+    await connection.beginTransaction()
+    const [[book]] = await connection.execute('SELECT title FROM books WHERE id = ? FOR UPDATE', [bookId])
+    if (!book) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Book not found.' })
+    }
+    await connection.execute('DELETE FROM books WHERE id = ?', [bookId])
+    await audit(connection, req.user.name, 'Book removed', `Removed "${book.title}" from the catalog`)
+    await connection.commit()
     res.status(204).end()
   } catch (error) {
+    await connection.rollback()
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
       return res.status(409).json({ error: 'This book has loan history and cannot be removed.' })
     }
     throw error
+  } finally {
+    connection.release()
   }
 }))
 

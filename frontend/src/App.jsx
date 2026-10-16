@@ -368,13 +368,16 @@ function App() {
   }
 
   async function deleteBook(book) {
-    if (!window.confirm(`Remove “${book.title}” from the catalog?`)) return
+    if (!window.confirm(`Delete “${book.title}” from the catalog? Books with loan history cannot be deleted.`)) return
+    setBusy(true)
     try {
       await api(`/books/${book.id}`, { method: 'DELETE' })
-      notify('Book removed.')
+      notify(`“${book.title}” was removed from the catalog.`)
       await loadData()
     } catch (error) {
       notify(error.message)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -565,7 +568,7 @@ function App() {
   }
 
   const canAdminister = user.role === 'Administrator'
-  const canManageMembers = ['Administrator', 'Librarian'].includes(user.role)
+  const canManageLibraryData = ['Administrator', 'Librarian'].includes(user.role)
   const availableBooks = books.filter((book) => book.availableCopies > 0)
   const selectedLoanMember = members.find((member) => String(member.id) === loanForm.memberId)
   const selectedMemberLimit = selectedLoanMember?.memberType === 'Teacher' ? 300 : 1
@@ -668,7 +671,7 @@ function App() {
               onEdit={(book) => { setBookForm({ ...initialBook, ...book, totalCopies: book.totalCopies, deliveredOn: book.deliveredOn || '', publicationYear: book.publicationYear || '' }); setModal({ type: 'book', book }) }}
               onDelete={deleteBook}
               onExport={exportCatalog}
-              canAdminister={canAdminister}
+              canManage={canManageLibraryData}
             />
           )}
           {page === 'Members' && (
@@ -697,7 +700,7 @@ function App() {
                 setModal({ type: 'member', member })
               }}
               onDelete={deleteMember}
-              canManage={canManageMembers}
+              canManage={canManageLibraryData}
               canAdminister={canAdminister}
             />
           )}
@@ -983,7 +986,7 @@ function SearchBox({ value, onChange, placeholder }) {
   return <label className="flex min-w-0 items-center gap-2.5 rounded-xl border border-[#e8ece6] bg-white px-3.5 py-2.5 focus-within:border-[#9db9a0] sm:w-[260px]"><Search size={15} className="shrink-0 text-[#98a39a]" /><input className="min-w-0 flex-1 border-0 bg-transparent text-[11px] outline-none placeholder:text-[#a0aaa2]" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
 }
 
-function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd, onEdit, onDelete, onExport, canAdminister }) {
+function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd, onEdit, onDelete, onExport, canManage }) {
   return (
     <>
       <PageHeading eyebrow="Manage and import library books" title="Book collection" description={`${books.length} title${books.length === 1 ? '' : 's'} to explore`}>
@@ -1008,7 +1011,7 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
           <table className="w-full min-w-[1080px] text-left">
             <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Book</th><th className="px-4 py-3.5">ISBN</th><th className="px-4 py-3.5">Publisher</th><th className="px-4 py-3.5">Grade</th><th className="px-4 py-3.5">Copies</th><th className="px-4 py-3.5">Delivered</th><th className="px-4 py-3.5">Published</th><th className="px-4 py-3.5">Shelf</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {books.map((book, index) => <tr key={book.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-3"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="max-w-[220px] truncate text-[11px] font-bold">{book.title}</p><p className="mt-1 text-[10px] text-[#8b968d]">{book.author || book.category || 'Book'}</p></div></div></td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.isbn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publisher || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.grade || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.deliveredOn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publicationYear || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.shelf}</td><td className="px-5 py-3 text-right"><button onClick={() => onEdit(book)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed]">Edit</button>{canAdminister && <button onClick={() => onDelete(book)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9]">Remove</button>}</td></tr>)}
+              {books.map((book, index) => <tr key={book.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-3"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="max-w-[220px] truncate text-[11px] font-bold">{book.title}</p><p className="mt-1 text-[10px] text-[#8b968d]">{book.author || book.category || 'Book'}</p></div></div></td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.isbn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publisher || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.grade || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.deliveredOn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publicationYear || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.shelf}</td><td className="px-5 py-3 text-right"><button disabled={busy} onClick={() => onEdit(book)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Edit</button>{canManage && <button disabled={busy} onClick={() => onDelete(book)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button>}</td></tr>)}
               {books.length === 0 && <EmptyRow colSpan={9} message="No books found. Try another search, import a CSV, or add a title to your collection." />}
             </tbody>
           </table>

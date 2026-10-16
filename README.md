@@ -91,7 +91,7 @@ This changes the single librarian account's username and bcrypt password without
 ## Features
 
 - Dashboard with live collection, loan, member, and overdue totals
-- Searchable book catalog with add, edit, and CSV import/export
+- Searchable book catalog with add, edit, delete, and CSV import/export; deletion is blocked for books with loan history
 - GS Busanza student directory for S1A–S6MCE classes and a separate teacher directory
 - Edit member details and, for administrators, delete members that have no loan or attendance history
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
