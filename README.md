@@ -93,22 +93,32 @@ This changes the single librarian account's username and bcrypt password without
 - Dashboard with live collection, loan, member, and overdue totals
 - Searchable book catalog with add, edit, and CSV export
 - GS Busanza student directory for S1A–S6MCE classes and a separate teacher directory
-- CSV import/export for students and teachers, duplicate reporting, and optional email addresses
+- CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
 - Name, membership-number, class, and member-type search and filters
-- Book checkout, return, and overdue tracking
+- Book checkout with an optional physical copy/accession code, return, and overdue tracking
 - Borrower counts and filtered circulation/class reports with CSV export
 - Audit history for library actions
 - JWT sign-in, hashed staff passwords, and Administrator/Librarian permissions
 
 ### Student and teacher CSV files
 
-Download either CSV template from **Students & teachers**. Both templates use these exact headers:
+Download either CSV template from **Students & teachers**. Both templates use these headers:
 
 ```csv
-name,member_type,class_section,membership_number,email
+name,member_type,class_section,membership_number,email,phone
 ```
 
-For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email and membership number may be blank; missing numbers are generated. Duplicate membership numbers and email addresses are skipped and reported. Imports accept up to 5,000 rows per file.
+For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email, phone, and membership number may be blank; missing numbers are generated. Duplicate membership numbers and email addresses are skipped and reported. Phone values are stored for directory use only; automated notifications remain off. Imports accept up to 5,000 rows per file.
+
+### Separate reports
+
+In **Reports**, select which output to generate: loan activity (filterable by active/overdue/returned status, member type, class, date, person, book, ISBN, or copy code), student/teacher borrowing totals, borrowing by class, or book inventory. Each report can be exported separately as CSV.
+
+When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and a code already on an unreturned loan cannot be checked out again until that copy is returned.
+
+### Automatic email and WhatsApp notifications
+
+Automatic notifications are disabled. Email sending needs a configured mail provider; WhatsApp via Twilio is not free for production and requires an approved/verified WhatsApp sender, recipient consent, and billable Twilio/Meta message fees. No Twilio account or sender was created or connected.
 
 ### Apply the school-directory database migration
 
@@ -118,7 +128,7 @@ Before deploying these directory features to an existing database, run the idemp
 npm.cmd run db:migrate:directory
 ```
 
-It makes member email optional, adds member type and class fields/indexes, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
+It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code to loan records, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
 For a deployed Vercel database, an authenticated Librarian or Administrator can apply the same idempotent migration with `POST /api/admin/migrations/school-directory` and a Bearer token.
 
 ## Other commands

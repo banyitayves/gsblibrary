@@ -65,11 +65,16 @@ function validateMember(data) {
   const membershipNumber = String(data.membership_number ?? data.membershipNumber ?? '').trim()
   const emailValue = String(data.email || '').trim().toLowerCase()
   const email = emailValue || null
+  const phoneValue = String(data.phone || '').trim()
+  const phone = phoneValue || null
 
   if (!name || name.length > 120) return { error: 'Name is required and must be at most 120 characters.' }
   if (!['Student', 'Teacher'].includes(memberType)) return { error: 'Member type must be Student or Teacher.' }
   if (email && (email.length > 190 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
     return { error: 'Email must be a valid address or left blank.' }
+  }
+  if (phone && (phone.length > 32 || !/^\+?[0-9 ()-]+$/.test(phone) || phone.replace(/\D/g, '').length < 7)) {
+    return { error: 'Phone number must have at least 7 digits and use only numbers, spaces, +, parentheses, or hyphens.' }
   }
   if (membershipNumber.length > 32) return { error: 'Membership number must be at most 32 characters.' }
   if (memberType === 'Student' && !schoolClasses.includes(classSection)) {
@@ -85,6 +90,7 @@ function validateMember(data) {
       classSection: memberType === 'Student' ? classSection : null,
       membershipNumber: membershipNumber || membershipNumberFor(memberType),
       email,
+      phone,
     },
   }
 }
@@ -109,9 +115,9 @@ function reportFilters(query, includeStatus = true) {
 
   const search = String(query.search || '').trim()
   if (search) {
-    conditions.push('(m.name LIKE ? OR m.membership_number LIKE ? OR b.title LIKE ? OR b.isbn LIKE ?)')
+    conditions.push('(m.name LIKE ? OR m.membership_number LIKE ? OR b.title LIKE ? OR b.isbn LIKE ? OR l.copy_code LIKE ?)')
     const term = `%${search}%`
-    params.push(term, term, term, term)
+    params.push(term, term, term, term, term)
   }
   const classSection = String(query.classSection || '').trim().toUpperCase()
   if (classSection) {
@@ -134,7 +140,7 @@ function reportFilters(query, includeStatus = true) {
 
 const loanReportSelect = `SELECT l.id, b.title AS bookTitle, b.isbn,
   m.id AS memberId, m.name AS memberName, m.membership_number AS membershipNumber,
-  m.member_type AS memberType, m.class_section AS classSection, m.email,
+  m.member_type AS memberType, m.class_section AS classSection, m.email, l.copy_code AS copyCode,
   DATE_FORMAT(l.issued_at, '%Y-%m-%d') AS issuedAt,
   DATE_FORMAT(l.due_date, '%Y-%m-%d') AS dueDate,
   DATE_FORMAT(l.returned_at, '%Y-%m-%d') AS returnedAt,
@@ -371,15 +377,15 @@ app.delete('/api/books/:id', ...canAdminister, asyncRoute(async (req, res) => {
 app.get('/api/members', ...staff, asyncRoute(async (req, res) => {
   const search = `%${String(req.query.search || '').trim()}%`
   const [members] = await pool.execute(
-    `SELECT m.id, m.membership_number AS membershipNumber, m.name, m.email,
+    `SELECT m.id, m.membership_number AS membershipNumber, m.name, m.email, m.phone,
        m.member_type AS memberType, m.class_section AS classSection, m.status,
        DATE_FORMAT(m.joined_at, '%Y-%m-%d') AS joinedAt,
        (SELECT COUNT(*) FROM loans l WHERE l.member_id = m.id AND l.returned_at IS NULL) AS activeLoans,
        (SELECT COUNT(*) FROM loans l WHERE l.member_id = m.id) AS totalLoans
      FROM members m
-     WHERE m.name LIKE ? OR m.email LIKE ? OR m.membership_number LIKE ? OR m.class_section LIKE ?
+     WHERE m.name LIKE ? OR m.email LIKE ? OR m.phone LIKE ? OR m.membership_number LIKE ? OR m.class_section LIKE ?
      ORDER BY name`,
-    [search, search, search, search],
+    [search, search, search, search, search],
   )
   res.json(members.map((member) => ({
     ...member,
@@ -395,9 +401,9 @@ app.post('/api/members', ...canManage, asyncRoute(async (req, res) => {
 
   try {
     const [result] = await pool.execute(
-      `INSERT INTO members (membership_number, name, email, member_type, class_section)
-       VALUES (?, ?, ?, ?, ?)`,
-      [value.membershipNumber, value.name, value.email, value.memberType, value.classSection],
+      `INSERT INTO members (membership_number, name, email, phone, member_type, class_section)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [value.membershipNumber, value.name, value.email, value.phone, value.memberType, value.classSection],
     )
     await audit(pool, req.user.name, 'Member added', `Registered ${value.name} as a ${value.memberType.toLowerCase()}`)
     res.status(201).json({
@@ -472,9 +478,9 @@ app.post('/api/members/import', ...canManage, asyncRoute(async (req, res) => {
         continue
       }
       await connection.execute(
-        `INSERT INTO members (membership_number, name, email, member_type, class_section)
-         VALUES (?, ?, ?, ?, ?)`,
-        [value.membershipNumber, value.name, value.email, value.memberType, value.classSection],
+        `INSERT INTO members (membership_number, name, email, phone, member_type, class_section)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [value.membershipNumber, value.name, value.email, value.phone, value.memberType, value.classSection],
       )
       imported.push({ line, name: value.name, memberType: value.memberType })
     }
@@ -516,7 +522,7 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
       ? 'WHERE l.returned_at IS NULL AND l.due_date >= CURRENT_DATE()'
       : ''
   const [loans] = await pool.query(
-    `SELECT l.id, b.id AS bookId, b.title AS bookTitle, b.isbn,
+    `SELECT l.id, b.id AS bookId, b.title AS bookTitle, b.isbn, l.copy_code AS copyCode,
        m.id AS memberId, m.name AS memberName, m.membership_number AS membershipNumber,
        m.member_type AS memberType, m.class_section AS classSection,
        DATE_FORMAT(l.issued_at, '%Y-%m-%d') AS issuedAt,
@@ -562,8 +568,8 @@ app.get('/api/reports/people', ...staff, asyncRoute(async (req, res) => {
   const params = []
   const search = `%${String(req.query.search || '').trim()}%`
   if (req.query.search) {
-    conditions.push('(m.name LIKE ? OR m.membership_number LIKE ? OR m.email LIKE ?)')
-    params.push(search, search, search)
+    conditions.push('(m.name LIKE ? OR m.membership_number LIKE ? OR m.email LIKE ? OR m.phone LIKE ?)')
+    params.push(search, search, search, search)
   }
   const memberType = String(req.query.memberType || '').trim()
   if (memberType && !['Student', 'Teacher'].includes(memberType)) {
@@ -581,14 +587,14 @@ app.get('/api/reports/people', ...staff, asyncRoute(async (req, res) => {
   }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
   const [people] = await pool.execute(
-    `SELECT m.id, m.name, m.membership_number AS membershipNumber, m.email,
+    `SELECT m.id, m.name, m.membership_number AS membershipNumber, m.email, m.phone,
        m.member_type AS memberType, m.class_section AS classSection, m.status,
        COUNT(l.id) AS totalLoans,
        SUM(l.id IS NOT NULL AND l.returned_at IS NULL) AS activeLoans,
        SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
      FROM members m LEFT JOIN loans l ON l.member_id = m.id
      ${where}
-     GROUP BY m.id, m.name, m.membership_number, m.email, m.member_type, m.class_section, m.status
+     GROUP BY m.id, m.name, m.membership_number, m.email, m.phone, m.member_type, m.class_section, m.status
      ORDER BY m.name LIMIT 20000`,
     params,
   )
@@ -634,6 +640,79 @@ app.get('/api/reports/classes', ...staff, asyncRoute(async (req, res) => {
   res.json(classes.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === 'bigint' || typeof value === 'number' ? Number(value) : value]))))
 }))
 
+app.get('/api/export/people.csv', ...staff, asyncRoute(async (req, res) => {
+  const conditions = []
+  const params = []
+  const search = String(req.query.search || '').trim()
+  if (search) {
+    conditions.push('(m.name LIKE ? OR m.membership_number LIKE ? OR m.email LIKE ? OR m.phone LIKE ?)')
+    const term = `%${search}%`
+    params.push(term, term, term, term)
+  }
+  const memberType = String(req.query.memberType || '').trim()
+  if (memberType && !['Student', 'Teacher'].includes(memberType)) {
+    return res.status(400).json({ error: 'Choose Student or Teacher.' })
+  }
+  if (memberType) {
+    conditions.push('m.member_type = ?')
+    params.push(memberType)
+  }
+  const classSection = String(req.query.classSection || '').trim().toUpperCase()
+  if (classSection) {
+    if (!schoolClasses.includes(classSection)) return res.status(400).json({ error: 'Select a valid student class.' })
+    conditions.push('m.class_section = ?')
+    params.push(classSection)
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  const [people] = await pool.execute(
+    `SELECT m.name, m.membership_number AS membershipNumber, m.member_type AS memberType,
+       m.class_section AS classSection, m.email, m.phone, m.status,
+       COUNT(l.id) AS totalLoans,
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL) AS activeLoans,
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
+     FROM members m LEFT JOIN loans l ON l.member_id = m.id
+     ${where}
+     GROUP BY m.id, m.name, m.membership_number, m.member_type, m.class_section, m.email, m.phone, m.status
+     ORDER BY m.name LIMIT 20000`,
+    params,
+  )
+  const columns = ['name', 'membershipNumber', 'memberType', 'classSection', 'email', 'phone', 'status', 'totalLoans', 'activeLoans', 'overdueLoans']
+  res.type('text/csv').attachment('gs-busanza-borrowers.csv').send(csvDocument(columns, people))
+}))
+
+app.get('/api/export/classes.csv', ...staff, asyncRoute(async (req, res) => {
+  const from = String(req.query.from || '')
+  const to = String(req.query.to || '')
+  if ((from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (to && !/^\d{4}-\d{2}-\d{2}$/.test(to))) {
+    return res.status(400).json({ error: 'Report dates must use YYYY-MM-DD.' })
+  }
+  if (from && to && from > to) return res.status(400).json({ error: 'The start date must not be after the end date.' })
+  const classRows = schoolClasses.map(() => 'SELECT ? AS classSection').join(' UNION ALL ')
+  const params = [...schoolClasses]
+  const loanDateFilter = []
+  if (from) {
+    loanDateFilter.push('l.issued_at >= ?')
+    params.push(from)
+  }
+  if (to) {
+    loanDateFilter.push('l.issued_at < DATE_ADD(?, INTERVAL 1 DAY)')
+    params.push(to)
+  }
+  const [classes] = await pool.execute(
+    `SELECT c.classSection, COUNT(DISTINCT m.id) AS students,
+       COUNT(l.id) AS totalLoans,
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL) AS activeLoans,
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
+     FROM (${classRows}) c
+     LEFT JOIN members m ON m.class_section = c.classSection AND m.member_type = 'Student'
+     LEFT JOIN loans l ON l.member_id = m.id${loanDateFilter.length ? ` AND ${loanDateFilter.join(' AND ')}` : ''}
+     GROUP BY c.classSection ORDER BY c.classSection`,
+    params,
+  )
+  const columns = ['classSection', 'students', 'totalLoans', 'activeLoans', 'overdueLoans']
+  res.type('text/csv').attachment('gs-busanza-class-report.csv').send(csvDocument(columns, classes))
+}))
+
 app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
   const bookId = Number(req.body.bookId)
   const memberId = Number(req.body.memberId)
@@ -666,9 +745,24 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
       return res.status(404).json({ error: 'Active member not found.' })
     }
 
+    const copyCode = String(req.body.copyCode || '').trim()
+    if (copyCode.length > 64) {
+      await connection.rollback()
+      return res.status(400).json({ error: 'Book copy code must be 64 characters or fewer.' })
+    }
+    if (copyCode) {
+      const [[existingCopy]] = await connection.execute(
+        'SELECT id FROM loans WHERE copy_code = ? AND returned_at IS NULL LIMIT 1 FOR UPDATE',
+        [copyCode],
+      )
+      if (existingCopy) {
+        await connection.rollback()
+        return res.status(409).json({ error: 'That physical book copy is already checked out.' })
+      }
+    }
     const [result] = await connection.execute(
-      'INSERT INTO loans (book_id, member_id, due_date) VALUES (?, ?, ?)',
-      [bookId, memberId, dueDate],
+      'INSERT INTO loans (book_id, member_id, due_date, copy_code) VALUES (?, ?, ?, ?)',
+      [bookId, memberId, dueDate, copyCode || null],
     )
     await connection.execute(
       'UPDATE books SET available_copies = available_copies - 1 WHERE id = ?',
@@ -676,7 +770,7 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
     )
     await audit(connection, req.user.name, 'Book checked out', `"${book.title}" checked out to ${member.name}`)
     await connection.commit()
-    res.status(201).json({ id: result.insertId, bookId, memberId, bookTitle: book.title, memberName: member.name, dueDate, status: 'Active' })
+    res.status(201).json({ id: result.insertId, bookId, memberId, bookTitle: book.title, memberName: member.name, dueDate, copyCode: copyCode || null, status: 'Active' })
   } catch (error) {
     await connection.rollback()
     throw error
@@ -728,10 +822,14 @@ app.get('/api/audit', ...staff, asyncRoute(async (_req, res) => {
 }))
 
 app.get('/api/export/books.csv', ...staff, asyncRoute(async (_req, res) => {
+  const search = `%${String(_req.query.search || '').trim()}%`
   const [books] = await pool.query(
     `SELECT isbn, title, author, category, shelf,
        total_copies AS total_copies, available_copies AS available_copies
-     FROM books ORDER BY title`,
+     FROM books
+     WHERE title LIKE ? OR author LIKE ? OR isbn LIKE ? OR category LIKE ?
+     ORDER BY title`,
+    [search, search, search, search],
   )
   const columns = ['isbn', 'title', 'author', 'category', 'shelf', 'total_copies', 'available_copies']
   const csv = csvDocument(columns, books)
@@ -740,11 +838,11 @@ app.get('/api/export/books.csv', ...staff, asyncRoute(async (_req, res) => {
 
 app.get('/api/export/members.csv', ...staff, asyncRoute(async (_req, res) => {
   const [members] = await pool.query(
-    `SELECT membership_number, name, member_type, class_section, email, status,
+    `SELECT membership_number, name, member_type, class_section, email, phone, status,
        DATE_FORMAT(joined_at, '%Y-%m-%d') AS joined_at
      FROM members ORDER BY member_type, class_section, name`,
   )
-  const columns = ['name', 'member_type', 'class_section', 'membership_number', 'email', 'status', 'joined_at']
+  const columns = ['name', 'member_type', 'class_section', 'membership_number', 'email', 'phone', 'status', 'joined_at']
   res.type('text/csv').attachment('gs-busanza-members.csv').send(csvDocument(columns, members))
 }))
 
@@ -757,7 +855,7 @@ app.get('/api/export/reports.csv', ...staff, asyncRoute(async (req, res) => {
   )
   const columns = [
     'issuedAt', 'memberName', 'membershipNumber', 'memberType', 'classSection',
-    'email', 'bookTitle', 'isbn', 'dueDate', 'returnedAt', 'status',
+    'email', 'bookTitle', 'isbn', 'copyCode', 'dueDate', 'returnedAt', 'status',
   ]
   res.type('text/csv').attachment('gs-busanza-library-report.csv').send(csvDocument(columns, rows))
 }))

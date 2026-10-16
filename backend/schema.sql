@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS members (
   membership_number VARCHAR(32) NOT NULL UNIQUE,
   name VARCHAR(120) NOT NULL,
   email VARCHAR(190) NULL UNIQUE,
+  phone VARCHAR(32) NULL,
   member_type ENUM('Student', 'Teacher') NOT NULL DEFAULT 'Student',
   class_section VARCHAR(20) NULL,
   status ENUM('Active', 'Suspended') NOT NULL DEFAULT 'Active',
@@ -44,8 +45,10 @@ CREATE TABLE IF NOT EXISTS loans (
   issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   due_date DATE NOT NULL,
   returned_at TIMESTAMP NULL DEFAULT NULL,
+  copy_code VARCHAR(64) NULL,
   INDEX idx_loans_due_date (due_date),
   INDEX idx_loans_member (member_id),
+  INDEX idx_loans_copy_code (copy_code, returned_at),
   CONSTRAINT fk_loans_book FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE RESTRICT,
   CONSTRAINT fk_loans_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;

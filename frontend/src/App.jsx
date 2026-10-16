@@ -45,7 +45,7 @@ const today = () => {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
-const memberCsvHeaders = 'name,member_type,class_section,membership_number,email'
+const memberCsvHeaders = 'name,member_type,class_section,membership_number,email,phone'
 const userFromSession = () => {
   try {
     return JSON.parse(sessionStorage.getItem('libraryflow-user') || 'null')
@@ -71,13 +71,13 @@ function App() {
   const [classFilter, setClassFilter] = useState('All')
   const [loanFilter, setLoanFilter] = useState('All')
   const [reportData, setReportData] = useState(null)
-  const [classReport, setClassReport] = useState([])
+  const [reportKind, setReportKind] = useState('loans')
   const [reportFilters, setReportFilters] = useState({ search: '', memberType: 'All', classSection: 'All', status: 'All', from: '', to: '' })
   const [importResult, setImportResult] = useState(null)
   const [modal, setModal] = useState(null)
   const [bookForm, setBookForm] = useState(initialBook)
-  const [memberForm, setMemberForm] = useState({ name: '', email: '', memberType: 'Student', classSection: 'S1A' })
-  const [loanForm, setLoanForm] = useState({ bookId: '', memberId: '', dueDate: '' })
+  const [memberForm, setMemberForm] = useState({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
+  const [loanForm, setLoanForm] = useState({ bookId: '', memberId: '', dueDate: '', copyCode: '' })
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState('')
@@ -135,14 +135,14 @@ function App() {
     return members.filter((member) =>
       (memberTypeFilter === 'All' || member.memberType === memberTypeFilter)
       && (classFilter === 'All' || member.classSection === classFilter)
-      && [member.name, member.email, member.membershipNumber, member.classSection].join(' ').toLowerCase().includes(term),
+      && [member.name, member.email, member.phone, member.membershipNumber, member.classSection].join(' ').toLowerCase().includes(term),
     )
   }, [members, search, memberTypeFilter, classFilter])
 
   const filteredLoans = useMemo(
     () => loans.filter((loan) =>
       (loanFilter === 'All' || loan.status === loanFilter)
-      && [loan.memberName, loan.membershipNumber, loan.bookTitle].join(' ').toLowerCase().includes(search.trim().toLowerCase()),
+      && [loan.memberName, loan.membershipNumber, loan.bookTitle, loan.isbn, loan.copyCode].join(' ').toLowerCase().includes(search.trim().toLowerCase()),
     ),
     [loans, loanFilter, search],
   )
@@ -197,7 +197,7 @@ function App() {
     try {
       await api('/members', { method: 'POST', body: JSON.stringify(memberForm) })
       setModal(null)
-      setMemberForm({ name: '', email: '', memberType: 'Student', classSection: 'S1A' })
+      setMemberForm({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
       notify('New member registered.')
       await loadData()
     } catch (error) {
@@ -216,7 +216,7 @@ function App() {
         body: JSON.stringify({ ...loanForm, bookId: Number(loanForm.bookId), memberId: Number(loanForm.memberId) }),
       })
       setModal(null)
-      setLoanForm({ bookId: '', memberId: '', dueDate: '' })
+      setLoanForm({ bookId: '', memberId: '', dueDate: '', copyCode: '' })
       notify('Book checked out successfully.')
       await loadData()
     } catch (error) {
@@ -311,17 +311,19 @@ function App() {
     }
   }
 
-  async function runReports(filters = reportFilters) {
+  async function runReports(filters = reportFilters, kind = reportKind) {
     setBusy(true)
     try {
       const params = new URLSearchParams()
       for (const [key, value] of Object.entries(filters)) {
         if (value && value !== 'All') params.set(key, value)
       }
-      const report = await api(`/reports?${params}`)
-      const classes = await api(`/reports/classes?${new URLSearchParams(Object.fromEntries(['from', 'to'].filter((key) => filters[key]).map((key) => [key, filters[key]])))}`)
-      setReportData(report)
-      setClassReport(classes)
+      let data
+      if (kind === 'loans') data = await api(`/reports?${params}`)
+      else if (kind === 'people') data = await api(`/reports/people?${params}`)
+      else if (kind === 'classes') data = await api(`/reports/classes?${new URLSearchParams(Object.fromEntries(['from', 'to'].filter((key) => filters[key]).map((key) => [key, filters[key]])))}`)
+      else data = await api(`/books?search=${encodeURIComponent(filters.search || '')}`)
+      setReportData({ kind, data, filters: { ...filters } })
     } catch (error) {
       notify(error.message)
     } finally {
@@ -452,7 +454,7 @@ function App() {
               busy={busy}
               onImport={importMembers}
               onExport={() => downloadCsv('/export/members.csv', 'gs-busanza-members.csv')}
-              onAdd={() => { setMemberForm({ name: '', email: '', memberType: 'Student', classSection: 'S1A' }); setModal({ type: 'member' }) }}
+              onAdd={() => { setMemberForm({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' }); setModal({ type: 'member' }) }}
             />
           )}
           {page === 'Loans' && (
@@ -469,16 +471,24 @@ function App() {
             <Reports
               filters={reportFilters}
               setFilters={setReportFilters}
+              kind={reportKind}
+              setKind={(kind) => { setReportKind(kind); setReportData(null) }}
               report={reportData}
-              classes={classReport}
               busy={busy}
-              onRun={() => runReports()}
+              onRun={() => runReports(reportFilters, reportKind)}
               onExport={() => {
                 const params = new URLSearchParams()
                 for (const [key, value] of Object.entries(reportFilters)) {
                   if (value && value !== 'All') params.set(key, value)
                 }
-                void downloadCsv(`/export/reports.csv?${params}`, 'gs-busanza-library-report.csv')
+                const exports = {
+                  loans: ['/export/reports.csv', 'gs-busanza-loan-report.csv'],
+                  people: ['/export/people.csv', 'gs-busanza-borrower-report.csv'],
+                  classes: ['/export/classes.csv', 'gs-busanza-class-report.csv'],
+                  books: ['/export/books.csv', 'gs-busanza-book-catalog-report.csv'],
+                }
+                const [path, filename] = exports[reportKind]
+                void downloadCsv(`${path}?${params}`, filename)
               }}
             />
           )}
@@ -511,6 +521,7 @@ function App() {
               {memberForm.memberType === 'Student' && <Field label="Class"><select required value={memberForm.classSection} onChange={(event) => setMemberForm({ ...memberForm, classSection: event.target.value })}>{schoolClasses.map((section) => <option key={section}>{section}</option>)}</select></Field>}
             </div>
             <Field label="Email address (optional)"><input type="email" value={memberForm.email} onChange={(event) => setMemberForm({ ...memberForm, email: event.target.value })} placeholder="name@example.com" /></Field>
+            <Field label="Phone / WhatsApp (optional)"><input type="tel" value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: event.target.value })} placeholder="+250 7XX XXX XXX" /></Field>
             <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Register member" />
           </form>
         </Modal>
@@ -536,6 +547,7 @@ function App() {
                   {members.filter((member) => member.status === 'Active').map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
                 </select>
               </Field>
+              <Field label="Code inside this physical book (optional)"><input maxLength="64" autoComplete="off" value={loanForm.copyCode} onChange={(event) => setLoanForm({ ...loanForm, copyCode: event.target.value })} placeholder="Enter the book's copy / accession code" /></Field>
               <Field label="Due date"><input required type="date" min={today()} value={loanForm.dueDate} onChange={(event) => setLoanForm({ ...loanForm, dueDate: event.target.value })} /></Field>
               <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Check out book" />
             </form>
@@ -771,7 +783,7 @@ function Members({ members, search, setSearch, typeFilter, setTypeFilter, classF
           <table className="w-full min-w-[780px] text-left">
             <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Student or teacher</th><th className="px-4 py-3.5">Type / class</th><th className="px-4 py-3.5">Membership no.</th><th className="px-4 py-3.5">Email</th><th className="px-4 py-3.5">Books out</th><th className="px-5 py-3.5">Status</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {members.map((member, index) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className={`flex size-9 items-center justify-center rounded-full text-[10px] font-bold ${['bg-[#edf2e9] text-[#6b846c]', 'bg-[#f2ede6] text-[#a17e5c]', 'bg-[#eeebf4] text-[#7e719a]', 'bg-[#f4ece8] text-[#a67762]'][index % 4]}`}>{initials(member.name)}</div><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td><td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}</td><td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td></tr>)}
+              {members.map((member, index) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className={`flex size-9 items-center justify-center rounded-full text-[10px] font-bold ${['bg-[#edf2e9] text-[#6b846c]', 'bg-[#f2ede6] text-[#a17e5c]', 'bg-[#eeebf4] text-[#7e719a]', 'bg-[#f4ece8] text-[#a67762]'][index % 4]}`}>{initials(member.name)}</div><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td><td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}<p className="mt-1 text-[9px] text-[#929d94]">{member.phone || 'No phone provided'}</p></td><td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td></tr>)}
               {members.length === 0 && <EmptyRow colSpan={6} message="No students or teachers match these filters. Import a CSV or add a person." />}
             </tbody>
           </table>
@@ -783,7 +795,7 @@ function Members({ members, search, setSearch, typeFilter, setTypeFilter, classF
 
 function downloadMemberTemplate(memberType) {
   const classSection = memberType === 'Teacher' ? '' : 'S1A'
-  const content = `${memberCsvHeaders}\nExample ${memberType.toLowerCase()},${memberType},${classSection},,\n`
+  const content = `${memberCsvHeaders}\nExample ${memberType.toLowerCase()},${memberType},${classSection},,,\n`
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = url
@@ -792,41 +804,50 @@ function downloadMemberTemplate(memberType) {
   URL.revokeObjectURL(url)
 }
 
-function Reports({ filters, setFilters, report, classes, busy, onRun, onExport }) {
+function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onExport }) {
   const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }))
+  const readyReport = report?.kind === kind && JSON.stringify(report.filters) === JSON.stringify(filters) ? report.data : null
+  const reportOptions = [
+    ['loans', 'Loan activity'],
+    ['people', 'Student & teacher borrowing'],
+    ['classes', 'Class borrowing'],
+    ['books', 'Book inventory'],
+  ]
   return (
     <>
-      <PageHeading eyebrow="Library activity at a glance" title="Reports" description="Search circulation, review class borrowing, and download records.">
-        <ActionButton secondary icon={Download} onClick={onExport} disabled={!report}>Export filtered CSV</ActionButton>
+      <PageHeading eyebrow="Choose exactly what to generate" title="Reports" description="Generate separate loan, borrower, class, or book reports.">
+        <ActionButton secondary icon={Download} onClick={onExport} disabled={!readyReport}>Export this report</ActionButton>
         <ActionButton onClick={onRun} disabled={busy}>{busy ? 'Generating…' : 'Generate report'}</ActionButton>
       </PageHeading>
       <section className="mb-5 grid gap-3 rounded-2xl border border-[#e9ede7] bg-white p-5 sm:grid-cols-2 xl:grid-cols-3">
-        <Field label="Search people, membership no. or book"><input value={filters.search} onChange={(event) => update('search', event.target.value)} placeholder="Name, number, title or ISBN" /></Field>
-        <Field label="Member type"><select value={filters.memberType} onChange={(event) => update('memberType', event.target.value)}><option>All</option><option>Student</option><option>Teacher</option></select></Field>
-        <Field label="Class"><select value={filters.classSection} onChange={(event) => update('classSection', event.target.value)}><option>All</option>{schoolClasses.map((section) => <option key={section}>{section}</option>)}</select></Field>
-        <Field label="Loan status"><select value={filters.status} onChange={(event) => update('status', event.target.value)}><option>All</option><option>Active</option><option>Overdue</option><option>Returned</option></select></Field>
-        <Field label="From date"><input type="date" value={filters.from} onChange={(event) => update('from', event.target.value)} /></Field>
-        <Field label="To date"><input type="date" value={filters.to} onChange={(event) => update('to', event.target.value)} /></Field>
+        <Field label="Report type"><select value={kind} onChange={(event) => setKind(event.target.value)}>{reportOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+        {kind !== 'classes' && <Field label="Search person, membership no., book or code"><input value={filters.search} onChange={(event) => update('search', event.target.value)} placeholder="Name, number, title, ISBN or copy code" /></Field>}
+        {(kind === 'loans' || kind === 'people') && <Field label="Member type"><select value={filters.memberType} onChange={(event) => update('memberType', event.target.value)}><option>All</option><option>Student</option><option>Teacher</option></select></Field>}
+        {(kind === 'loans' || kind === 'people') && <Field label="Class"><select value={filters.classSection} onChange={(event) => update('classSection', event.target.value)}><option>All</option>{schoolClasses.map((section) => <option key={section}>{section}</option>)}</select></Field>}
+        {kind === 'loans' && <Field label="Loan status"><select value={filters.status} onChange={(event) => update('status', event.target.value)}><option>All</option><option>Active</option><option>Overdue</option><option>Returned</option></select></Field>}
+        {(kind === 'loans' || kind === 'classes') && <Field label="From date"><input type="date" value={filters.from} onChange={(event) => update('from', event.target.value)} /></Field>}
+        {(kind === 'loans' || kind === 'classes') && <Field label="To date"><input type="date" value={filters.to} onChange={(event) => update('to', event.target.value)} /></Field>}
       </section>
-      {!report ? <section className="rounded-2xl border border-dashed border-[#dfe6dd] bg-white p-10 text-center text-sm text-[#829087]">Choose your filters and generate a report.</section> : <>
+      {!readyReport ? <section className="rounded-2xl border border-dashed border-[#dfe6dd] bg-white p-10 text-center text-sm text-[#829087]">Choose a report type and filters, then generate it.</section> : <>
+        {kind === 'loans' && <>
         <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           {[
-            ['All loans', report.summary.totalLoans],
-            ['Active', report.summary.activeLoans],
-            ['Overdue', report.summary.overdueLoans],
-            ['Returned', report.summary.returnedLoans],
-            ['Student loans', report.summary.studentLoans],
-            ['Teacher loans', report.summary.teacherLoans],
+            ['All loans', readyReport.summary.totalLoans],
+            ['Active', readyReport.summary.activeLoans],
+            ['Overdue', readyReport.summary.overdueLoans],
+            ['Returned', readyReport.summary.returnedLoans],
+            ['Student loans', readyReport.summary.studentLoans],
+            ['Teacher loans', readyReport.summary.teacherLoans],
           ].map(([label, value]) => <article key={label} className="rounded-2xl border border-[#e9ede7] bg-white p-4"><p className="text-[10px] font-semibold text-[#7c887f]">{label}</p><p className="mt-2 text-2xl font-bold">{Number(value).toLocaleString()}</p></article>)}
         </section>
-        <section className="mb-5 overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
-          <div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Class borrowing summary</h2><p className="mt-1 text-[10px] text-[#929d94]">Student counts and loans for every GS Busanza class.</p></div>
-          <div className="overflow-x-auto"><table className="w-full min-w-[580px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase tracking-wide text-[#929d94]"><tr><th className="px-5 py-3">Class</th><th className="px-4 py-3">Students</th><th className="px-4 py-3">Loans</th><th className="px-4 py-3">Active</th><th className="px-5 py-3">Overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{classes.map((row) => <tr key={row.classSection}><td className="px-5 py-3 font-bold">{row.classSection}</td><td className="px-4 py-3">{row.students}</td><td className="px-4 py-3">{row.totalLoans}</td><td className="px-4 py-3">{row.activeLoans}</td><td className="px-5 py-3">{row.overdueLoans}</td></tr>)}</tbody></table></div>
-        </section>
         <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
-          <div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Loan details</h2><p className="mt-1 text-[10px] text-[#929d94]">{report.rows.length.toLocaleString()} records{report.truncated ? ' (showing first 20,000; narrow filters to view fewer)' : ''}</p></div>
-          <div className="overflow-x-auto"><table className="w-full min-w-[880px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase tracking-wide text-[#929d94]"><tr><th className="px-5 py-3">Borrower</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Book</th><th className="px-4 py-3">Out / due</th><th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{report.rows.map((row) => <tr key={row.id}><td className="px-5 py-3"><span className="font-bold">{row.memberName}</span><span className="ml-2 text-[#929d94]">{row.membershipNumber}</span></td><td className="px-4 py-3">{row.memberType} · {row.classSection || '—'}</td><td className="px-4 py-3">{row.bookTitle}</td><td className="px-4 py-3">{row.issuedAt} / {row.dueDate}</td><td className="px-5 py-3">{row.status}</td></tr>)}{report.rows.length === 0 && <EmptyRow colSpan={5} message="No loan records match these filters." />}</tbody></table></div>
+          <div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Loan activity</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.rows.length.toLocaleString()} records{readyReport.truncated ? ' (showing first 20,000; narrow filters to view fewer)' : ''}</p></div>
+          <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase tracking-wide text-[#929d94]"><tr><th className="px-5 py-3">Borrower</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Book / copy code</th><th className="px-4 py-3">Out / due</th><th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.rows.map((row) => <tr key={row.id}><td className="px-5 py-3"><span className="font-bold">{row.memberName}</span><span className="ml-2 text-[#929d94]">{row.membershipNumber}</span></td><td className="px-4 py-3">{row.memberType} · {row.classSection || '—'}</td><td className="px-4 py-3">{row.bookTitle}<p className="mt-1 text-[#929d94]">{row.copyCode || 'No copy code'} · ISBN {row.isbn}</p></td><td className="px-4 py-3">{row.issuedAt} / {row.dueDate}</td><td className="px-5 py-3">{row.status}</td></tr>)}{readyReport.rows.length === 0 && <EmptyRow colSpan={5} message="No loan records match these filters." />}</tbody></table></div>
         </section>
+        </>}
+        {kind === 'people' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Student & teacher borrowing</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} people</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Name</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Membership</th><th className="px-4 py-3">Total loans</th><th className="px-5 py-3">Active / overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((person) => <tr key={person.id}><td className="px-5 py-3 font-bold">{person.name}</td><td className="px-4 py-3">{person.memberType} · {person.classSection || '—'}</td><td className="px-4 py-3">{person.membershipNumber}</td><td className="px-4 py-3">{person.totalLoans}</td><td className="px-5 py-3">{person.activeLoans} / {person.overdueLoans}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No borrowers match these filters." />}</tbody></table></div></section>}
+        {kind === 'classes' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Class borrowing summary</h2><p className="mt-1 text-[10px] text-[#929d94]">Student counts and loans for all 23 classes.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[580px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Class</th><th className="px-4 py-3">Students</th><th className="px-4 py-3">Loans</th><th className="px-4 py-3">Active</th><th className="px-5 py-3">Overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((row) => <tr key={row.classSection}><td className="px-5 py-3 font-bold">{row.classSection}</td><td className="px-4 py-3">{row.students}</td><td className="px-4 py-3">{row.totalLoans}</td><td className="px-4 py-3">{row.activeLoans}</td><td className="px-5 py-3">{row.overdueLoans}</td></tr>)}</tbody></table></div></section>}
+        {kind === 'books' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Book inventory</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} titles</p></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Category</th><th className="px-4 py-3">Shelf</th><th className="px-5 py-3">Available / total</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author}</p></td><td className="px-4 py-3">{book.isbn}</td><td className="px-4 py-3">{book.category}</td><td className="px-4 py-3">{book.shelf}</td><td className="px-5 py-3">{book.availableCopies} / {book.totalCopies}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No books match this search." />}</tbody></table></div></section>}
       </>}
     </>
   )
@@ -849,7 +870,7 @@ function Loans({ loans, filter, setFilter, onIssue, onReturn, busy }) {
           <table className="w-full min-w-[720px] text-left">
             <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Book</th><th className="px-4 py-3.5">Member</th><th className="px-4 py-3.5">Checked out</th><th className="px-4 py-3.5">Due date</th><th className="px-4 py-3.5">Status</th><th className="px-5 py-3.5 text-right">Action</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {loans.map((loan, index) => <tr key={loan.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="text-[11px] font-bold">{loan.bookTitle}</p><p className="mt-1 text-[9px] text-[#929d94]">{loan.isbn}</p></div></div></td><td className="px-4 py-4"><p className="text-[10px] font-semibold">{loan.memberName}</p><p className="mt-1 text-[9px] text-[#929d94]">{loan.membershipNumber}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.issuedAt}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.dueDate}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${loan.status === 'Returned' ? 'bg-[#f1f2ef] text-[#858f87]' : loan.status === 'Overdue' ? 'bg-[#f9eee9] text-[#b46d53]' : 'bg-[#edf4ed] text-[#64846b]'}`}>{loan.status}</span></td><td className="px-5 py-4 text-right">{loan.status !== 'Returned' && <button disabled={busy} onClick={() => onReturn(loan)} className="rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Mark returned</button>}{loan.status === 'Returned' && <span className="text-[10px] text-[#a0aaa2]">All done <Check className="ml-1 inline" size={12} /></span>}</td></tr>)}
+              {loans.map((loan, index) => <tr key={loan.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="text-[11px] font-bold">{loan.bookTitle}</p><p className="mt-1 text-[9px] text-[#929d94]">ISBN {loan.isbn} · Copy {loan.copyCode || 'not recorded'}</p></div></div></td><td className="px-4 py-4"><p className="text-[10px] font-semibold">{loan.memberName}</p><p className="mt-1 text-[9px] text-[#929d94]">{loan.membershipNumber}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.issuedAt}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.dueDate}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${loan.status === 'Returned' ? 'bg-[#f1f2ef] text-[#858f87]' : loan.status === 'Overdue' ? 'bg-[#f9eee9] text-[#b46d53]' : 'bg-[#edf4ed] text-[#64846b]'}`}>{loan.status}</span></td><td className="px-5 py-4 text-right">{loan.status !== 'Returned' && <button disabled={busy} onClick={() => onReturn(loan)} className="rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Mark returned</button>}{loan.status === 'Returned' && <span className="text-[10px] text-[#a0aaa2]">All done <Check className="ml-1 inline" size={12} /></span>}</td></tr>)}
               {loans.length === 0 && <EmptyRow colSpan={6} message={filter === 'All' ? 'No loans yet. Check out a book to get started.' : `No ${filter.toLowerCase()} loans right now.`} />}
             </tbody>
           </table>
