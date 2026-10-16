@@ -162,21 +162,23 @@ function validateBook(body) {
   const totalCopies = Number(body.totalCopies ?? body.copies)
   const deliveredOnValue = String(body.deliveredOn ?? body.dateDelivered ?? '').trim()
   const deliveredOn = deliveredOnValue || null
-  const publishedOn = body.publishedOn ? String(body.publishedOn) : null
+  const publicationYearValue = String(body.publicationYear ?? body.publishedYear ?? '').trim()
+  const publicationYear = publicationYearValue ? Number(publicationYearValue) : null
 
   if (!title || title.length > 255 || (isbn && isbn.length > 32) || (author && author.length > 180)
     || (publisher && publisher.length > 180) || (grade && grade.length > 40) || shelf.length > 40
-    || !Number.isInteger(totalCopies) || totalCopies < 1 || totalCopies > 10000) {
+    || !Number.isInteger(totalCopies) || totalCopies < 1 || totalCopies > 10000
+    || (publicationYear !== null && (!Number.isInteger(publicationYear) || publicationYear < 1 || publicationYear > 9999))) {
     return { error: 'A title, valid optional book details, and a copy count between 1 and 10,000 are required.' }
   }
-  for (const [label, date] of [['Delivery date', deliveredOn], ['Publication date', publishedOn]]) {
+  for (const [label, date] of [['Delivery date', deliveredOn]]) {
     if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))
       || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date)) {
       return { error: `${label} must be a valid date in YYYY-MM-DD format.` }
     }
   }
 
-  return { value: { isbn, title, author: author || null, publisher, category, grade, shelf, totalCopies, deliveredOn, publishedOn } }
+  return { value: { isbn, title, author: author || null, publisher, category, grade, shelf, totalCopies, deliveredOn, publicationYear } }
 }
 
 app.get('/api/health', asyncRoute(async (_req, res) => {
@@ -299,7 +301,7 @@ app.get('/api/books', ...staff, asyncRoute(async (req, res) => {
     `SELECT id, isbn, title, author, publisher, category, grade, shelf,
        total_copies AS totalCopies, available_copies AS availableCopies,
        DATE_FORMAT(delivered_on, '%Y-%m-%d') AS deliveredOn,
-       DATE_FORMAT(published_on, '%Y-%m-%d') AS publishedOn
+       published_year AS publicationYear
      FROM books
      WHERE title LIKE ? OR author LIKE ? OR publisher LIKE ? OR isbn LIKE ? OR category LIKE ? OR grade LIKE ? OR shelf LIKE ?
      ORDER BY title`,
@@ -339,7 +341,7 @@ app.post('/api/books/import', ...canManage, asyncRoute(async (req, res) => {
         ...row,
         totalCopies: row.total_copies || row.copies,
         deliveredOn: row.date_delivered || row.delivered_on,
-        publishedOn: row.date_of_publication || row.published_on,
+        publicationYear: row.publication_year || (row.date_of_publication ? String(row.date_of_publication).slice(0, 4) : ''),
         shelfLocation: row.shelf_location || row.shelf,
       })
       const line = index + 1
@@ -361,9 +363,9 @@ app.post('/api/books/import', ...canManage, asyncRoute(async (req, res) => {
       }
       await connection.execute(
         `INSERT INTO books
-         (isbn, title, author, publisher, category, grade, shelf, total_copies, available_copies, delivered_on, published_on)
+         (isbn, title, author, publisher, category, grade, shelf, total_copies, available_copies, delivered_on, published_year)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.shelf, value.totalCopies, value.totalCopies, value.deliveredOn, value.publishedOn],
+        [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.shelf, value.totalCopies, value.totalCopies, value.deliveredOn, value.publicationYear],
       )
       imported.push({ line, title: value.title })
     }
@@ -390,9 +392,9 @@ app.post('/api/books', ...canManage, asyncRoute(async (req, res) => {
     await connection.beginTransaction()
     const [result] = await connection.execute(
       `INSERT INTO books
-       (isbn, title, author, publisher, category, grade, shelf, total_copies, available_copies, delivered_on, published_on)
+       (isbn, title, author, publisher, category, grade, shelf, total_copies, available_copies, delivered_on, published_year)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.shelf, value.totalCopies, value.totalCopies, value.deliveredOn, value.publishedOn],
+      [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.shelf, value.totalCopies, value.totalCopies, value.deliveredOn, value.publicationYear],
     )
     await audit(connection, req.user.name, 'Book added', `Added "${value.title}" to the catalog`)
     await connection.commit()
@@ -431,8 +433,8 @@ app.put('/api/books/:id', ...canManage, asyncRoute(async (req, res) => {
     const availableCopies = value.totalCopies - borrowed
     await connection.execute(
       `UPDATE books SET isbn = ?, title = ?, author = ?, publisher = ?, category = ?, grade = ?, shelf = ?,
-       total_copies = ?, available_copies = ?, delivered_on = ?, published_on = ? WHERE id = ?`,
-      [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.shelf, value.totalCopies, availableCopies, value.deliveredOn, value.publishedOn, req.params.id],
+       total_copies = ?, available_copies = ?, delivered_on = ?, published_year = ? WHERE id = ?`,
+      [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.shelf, value.totalCopies, availableCopies, value.deliveredOn, value.publicationYear, req.params.id],
     )
     await audit(connection, req.user.name, 'Book updated', `Updated "${value.title}" in the catalog`)
     await connection.commit()
@@ -878,12 +880,23 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
       return res.status(409).json({ error: 'There are no available copies of this book.' })
     }
     const [[member]] = await connection.execute(
-      'SELECT id, name FROM members WHERE id = ? AND status = ?',
+      'SELECT id, name, member_type AS memberType FROM members WHERE id = ? AND status = ? FOR UPDATE',
       [memberId, 'Active'],
     )
     if (!member) {
       await connection.rollback()
       return res.status(404).json({ error: 'Active member not found.' })
+    }
+    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 1
+    const [[loanCount]] = await connection.execute(
+      'SELECT COUNT(*) AS activeLoans FROM loans WHERE member_id = ? AND returned_at IS NULL',
+      [memberId],
+    )
+    if (Number(loanCount.activeLoans) >= maximumActiveLoans) {
+      await connection.rollback()
+      return res.status(409).json({
+        error: `${member.memberType}s may have at most ${maximumActiveLoans} active book${maximumActiveLoans === 1 ? '' : 's'} checked out at a time.`,
+      })
     }
 
     const copyCode = String(req.body.copyCode || '').trim()
@@ -968,13 +981,13 @@ app.get('/api/export/books.csv', ...staff, asyncRoute(async (_req, res) => {
     `SELECT title, isbn, publisher, author, category, grade, shelf,
        total_copies AS total_copies, available_copies AS available_copies,
        DATE_FORMAT(delivered_on, '%Y-%m-%d') AS date_delivered,
-       DATE_FORMAT(published_on, '%Y-%m-%d') AS date_of_publication
+       published_year AS publication_year
      FROM books
      WHERE title LIKE ? OR author LIKE ? OR publisher LIKE ? OR isbn LIKE ? OR category LIKE ? OR grade LIKE ? OR shelf LIKE ?
      ORDER BY title`,
     [search, search, search, search, search, search, search],
   )
-  const columns = ['title', 'isbn', 'publisher', 'author', 'category', 'grade', 'shelf', 'total_copies', 'available_copies', 'date_delivered', 'date_of_publication']
+  const columns = ['title', 'isbn', 'publisher', 'author', 'category', 'grade', 'shelf', 'total_copies', 'available_copies', 'date_delivered', 'publication_year']
   const csv = csvDocument(columns, books)
   res.type('text/csv').attachment('library-catalog.csv').send(csv)
 }))

@@ -21,10 +21,17 @@ export async function migrateSchoolDirectory(connection) {
     ['publisher', 'VARCHAR(180) NULL'],
     ['grade', 'VARCHAR(40) NULL'],
     ['delivered_on', 'DATE NULL'],
+    ['published_year', 'SMALLINT UNSIGNED NULL'],
   ]) {
     if (!existingBookColumns.has(name)) {
       await connection.query(`ALTER TABLE books ADD COLUMN ${name} ${definition}`)
     }
+  }
+  if (existingBookColumns.has('published_on')) {
+    await connection.query(
+      'UPDATE books SET published_year = YEAR(published_on) WHERE published_year IS NULL AND published_on IS NOT NULL',
+    )
+    await connection.query('UPDATE books SET published_on = NULL WHERE published_on IS NOT NULL')
   }
 
   const [columns] = await connection.execute(

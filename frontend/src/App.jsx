@@ -15,12 +15,14 @@ import {
   LayoutDashboard,
   LibraryBig,
   LogOut,
+  Moon,
   Plus,
   Search,
   Sparkles,
   Upload,
   UsersRound,
   X,
+  Sun,
 } from 'lucide-react'
 import { api } from './api.js'
 
@@ -40,13 +42,13 @@ const navigation = [
   { id: 'Reports', label: 'Reports', icon: FileBarChart },
 ]
 
-const initialBook = { isbn: '', title: '', author: '', publisher: '', category: '', grade: '', shelf: '', totalCopies: 1, deliveredOn: '', publishedOn: '' }
+const initialBook = { isbn: '', title: '', author: '', publisher: '', category: '', grade: '', shelf: '', totalCopies: 1, deliveredOn: '', publicationYear: '' }
 const today = () => {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 const memberCsvHeaders = 'name,member_type,class_section,membership_number,email,phone'
-const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,date_of_publication,grade,shelf_location,category'
+const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,publication_year,grade,shelf_location,category'
 const reportDefinitions = {
   loans: {
     title: 'Loan activity',
@@ -78,11 +80,11 @@ const reportDefinitions = {
   },
   books: {
     title: 'Book inventory',
-    columns: [['Title', 'title'], ['ISBN', 'isbn'], ['Publisher', 'publisher'], ['Grade', 'grade'], ['Shelf', 'shelf'], ['Available copies', 'availableCopies'], ['Total copies', 'totalCopies'], ['Date delivered', 'deliveredOn'], ['Publication date', 'publishedOn']],
+    columns: [['Title', 'title'], ['ISBN', 'isbn'], ['Publisher', 'publisher'], ['Grade', 'grade'], ['Shelf', 'shelf'], ['Available copies', 'availableCopies'], ['Total copies', 'totalCopies'], ['Date delivered', 'deliveredOn'], ['Publication year', 'publicationYear']],
   },
   availability: {
     title: 'Book availability',
-    columns: [['Title', 'title'], ['ISBN', 'isbn'], ['Publisher', 'publisher'], ['Grade', 'grade'], ['Shelf', 'shelf'], ['Available copies', 'availableCopies'], ['Total copies', 'totalCopies'], ['Date delivered', 'deliveredOn'], ['Publication date', 'publishedOn'], ['Availability', 'availability']],
+    columns: [['Title', 'title'], ['ISBN', 'isbn'], ['Publisher', 'publisher'], ['Grade', 'grade'], ['Shelf', 'shelf'], ['Available copies', 'availableCopies'], ['Total copies', 'totalCopies'], ['Date delivered', 'deliveredOn'], ['Publication year', 'publicationYear'], ['Availability', 'availability']],
   },
 }
 const userFromSession = () => {
@@ -120,6 +122,13 @@ function App() {
   const [loanForm, setLoanForm] = useState({ bookId: '', memberId: '', dueDate: '', copyCode: '' })
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const [busy, setBusy] = useState(false)
+  const [darkMode, setDarkMode] = useState(() => {
+    try {
+      return localStorage.getItem('gsbusanza-theme') === 'dark'
+    } catch {
+      return false
+    }
+  })
   const [toast, setToast] = useState('')
   const toastTimer = useRef(null)
 
@@ -153,6 +162,15 @@ function App() {
     const timer = window.setTimeout(() => { void loadData() }, 0)
     return () => window.clearTimeout(timer)
   }, [loadData, user])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = darkMode ? 'dark' : 'light'
+    try {
+      localStorage.setItem('gsbusanza-theme', darkMode ? 'dark' : 'light')
+    } catch (error) {
+      console.warn('Could not save the theme preference on this device.', error)
+    }
+  }, [darkMode])
 
   useEffect(() => {
     const expireSession = () => {
@@ -478,6 +496,8 @@ function App() {
 
   const canAdminister = user.role === 'Administrator'
   const availableBooks = books.filter((book) => book.availableCopies > 0)
+  const selectedLoanMember = members.find((member) => String(member.id) === loanForm.memberId)
+  const selectedMemberLimit = selectedLoanMember?.memberType === 'Teacher' ? 300 : 1
 
   return (
     <div className="min-h-screen bg-[#f7f8f5] text-[#1d302b]">
@@ -532,6 +552,9 @@ function App() {
                 <span className="size-1.5 rounded-full bg-[#67a47b]" />
                 Library open today
               </div>
+              <button onClick={() => setDarkMode((current) => !current)} aria-label={`Switch to ${darkMode ? 'light' : 'dark'} mode`} title={`Switch to ${darkMode ? 'light' : 'dark'} mode`} className="rounded-xl border border-[#edf0eb] p-2.5 text-[#77847b] hover:bg-[#f7f8f5]">
+                {darkMode ? <Sun size={17} strokeWidth={1.8} /> : <Moon size={17} strokeWidth={1.8} />}
+              </button>
               <button onClick={() => notify('You’re all caught up.')} aria-label="Notifications" className="relative rounded-xl border border-[#edf0eb] p-2.5 text-[#77847b] hover:bg-[#f7f8f5]">
                 <Bell size={17} strokeWidth={1.8} />
                 {dashboard?.overdueLoans > 0 && <span className="absolute right-2 top-2 size-1.5 rounded-full bg-[#dc8c6e]" />}
@@ -571,7 +594,7 @@ function App() {
               busy={busy}
               onImport={importBooks}
               onAdd={() => { setBookForm(initialBook); setModal({ type: 'book' }) }}
-              onEdit={(book) => { setBookForm({ ...initialBook, ...book, totalCopies: book.totalCopies, deliveredOn: book.deliveredOn || '', publishedOn: book.publishedOn || '' }); setModal({ type: 'book', book }) }}
+              onEdit={(book) => { setBookForm({ ...initialBook, ...book, totalCopies: book.totalCopies, deliveredOn: book.deliveredOn || '', publicationYear: book.publicationYear || '' }); setModal({ type: 'book', book }) }}
               onDelete={deleteBook}
               onExport={exportCatalog}
               canAdminister={canAdminister}
@@ -627,7 +650,7 @@ function App() {
               <Field label="Publisher"><input value={bookForm.publisher || ''} onChange={(event) => setBookForm({ ...bookForm, publisher: event.target.value })} placeholder="Publisher name" /></Field>
               <Field label="Number of copies"><input required type="number" min="1" max="10000" value={bookForm.totalCopies} onChange={(event) => setBookForm({ ...bookForm, totalCopies: event.target.value })} /></Field>
               <Field label="Date delivered"><input type="date" value={bookForm.deliveredOn || ''} onChange={(event) => setBookForm({ ...bookForm, deliveredOn: event.target.value })} /></Field>
-              <Field label="Date of publication"><input type="date" value={bookForm.publishedOn || ''} onChange={(event) => setBookForm({ ...bookForm, publishedOn: event.target.value })} /></Field>
+              <Field label="Publication year"><input type="number" inputMode="numeric" min="1" max="9999" step="1" value={bookForm.publicationYear || ''} onChange={(event) => setBookForm({ ...bookForm, publicationYear: event.target.value })} placeholder="e.g. 2020" /></Field>
               <Field label="Grade"><input value={bookForm.grade || ''} onChange={(event) => setBookForm({ ...bookForm, grade: event.target.value })} placeholder="e.g. S2 or Senior 4" /></Field>
               <Field label="Shelf location"><input value={bookForm.shelf || ''} onChange={(event) => setBookForm({ ...bookForm, shelf: event.target.value })} placeholder="e.g. A1-04" /></Field>
               <Field label="Author (optional)"><input value={bookForm.author || ''} onChange={(event) => setBookForm({ ...bookForm, author: event.target.value })} placeholder="Author name" /></Field>
@@ -670,9 +693,14 @@ function App() {
               <Field label="Member">
                 <select required value={loanForm.memberId} onChange={(event) => setLoanForm({ ...loanForm, memberId: event.target.value })}>
                   <option value="">Choose a member</option>
-                  {members.filter((member) => member.status === 'Active').map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+                  {members.filter((member) => member.status === 'Active').map((member) => {
+                    const limit = member.memberType === 'Teacher' ? 300 : 1
+                    const atLimit = Number(member.activeLoans || 0) >= limit
+                    return <option key={member.id} value={member.id} disabled={atLimit}>{member.name} · {member.activeLoans || 0}/{limit} books{atLimit ? ' · limit reached' : ''}</option>
+                  })}
                 </select>
               </Field>
+              {selectedLoanMember && <p className="rounded-lg bg-[#f3f6f1] px-3 py-2 text-[11px] text-[#607667]">{selectedLoanMember.memberType} checkout limit: {selectedLoanMember.activeLoans || 0} of {selectedMemberLimit} active book(s).</p>}
               <Field label="Code inside this physical book (optional)"><input maxLength="64" autoComplete="off" value={loanForm.copyCode} onChange={(event) => setLoanForm({ ...loanForm, copyCode: event.target.value })} placeholder="Enter the book's copy / accession code" /></Field>
               <Field label="Due date"><input required type="date" min={today()} value={loanForm.dueDate} onChange={(event) => setLoanForm({ ...loanForm, dueDate: event.target.value })} /></Field>
               <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Check out book" />
@@ -877,7 +905,7 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
           <table className="w-full min-w-[1080px] text-left">
             <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Book</th><th className="px-4 py-3.5">ISBN</th><th className="px-4 py-3.5">Publisher</th><th className="px-4 py-3.5">Grade</th><th className="px-4 py-3.5">Copies</th><th className="px-4 py-3.5">Delivered</th><th className="px-4 py-3.5">Published</th><th className="px-4 py-3.5">Shelf</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {books.map((book, index) => <tr key={book.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-3"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="max-w-[220px] truncate text-[11px] font-bold">{book.title}</p><p className="mt-1 text-[10px] text-[#8b968d]">{book.author || book.category || 'Book'}</p></div></div></td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.isbn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publisher || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.grade || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.deliveredOn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publishedOn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.shelf}</td><td className="px-5 py-3 text-right"><button onClick={() => onEdit(book)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed]">Edit</button>{canAdminister && <button onClick={() => onDelete(book)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9]">Remove</button>}</td></tr>)}
+              {books.map((book, index) => <tr key={book.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-3"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="max-w-[220px] truncate text-[11px] font-bold">{book.title}</p><p className="mt-1 text-[10px] text-[#8b968d]">{book.author || book.category || 'Book'}</p></div></div></td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.isbn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publisher || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.grade || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.deliveredOn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publicationYear || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.shelf}</td><td className="px-5 py-3 text-right"><button onClick={() => onEdit(book)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed]">Edit</button>{canAdminister && <button onClick={() => onDelete(book)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9]">Remove</button>}</td></tr>)}
               {books.length === 0 && <EmptyRow colSpan={9} message="No books found. Try another search, import a CSV, or add a title to your collection." />}
             </tbody>
           </table>
@@ -943,7 +971,7 @@ function downloadMemberTemplate(memberType) {
 }
 
 function downloadBookTemplate() {
-  const content = `${bookCsvHeaders}\nExample book,9780000000000,Example Publisher,Example Author,1,2026-10-16,2020-01-01,S1,A1-04,Textbook\n`
+  const content = `${bookCsvHeaders}\nExample book,9780000000000,Example Publisher,Example Author,1,2026-10-16,2020,S1,A1-04,Textbook\n`
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = url
@@ -1005,7 +1033,7 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
         </>}
         {kind === 'people' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Student & teacher borrowing</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} people</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Name</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Membership</th><th className="px-4 py-3">Total loans</th><th className="px-5 py-3">Active / overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((person) => <tr key={person.id}><td className="px-5 py-3 font-bold">{person.name}</td><td className="px-4 py-3">{person.memberType} · {person.classSection || '—'}</td><td className="px-4 py-3">{person.membershipNumber}</td><td className="px-4 py-3">{person.totalLoans}</td><td className="px-5 py-3">{person.activeLoans} / {person.overdueLoans}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No borrowers match these filters." />}</tbody></table></div></section>}
         {kind === 'classes' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Class borrowing summary</h2><p className="mt-1 text-[10px] text-[#929d94]">Student counts and loans for all 23 classes.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[580px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Class</th><th className="px-4 py-3">Students</th><th className="px-4 py-3">Loans</th><th className="px-4 py-3">Active</th><th className="px-5 py-3">Overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((row) => <tr key={row.classSection}><td className="px-5 py-3 font-bold">{row.classSection}</td><td className="px-4 py-3">{row.students}</td><td className="px-4 py-3">{row.totalLoans}</td><td className="px-4 py-3">{row.activeLoans}</td><td className="px-5 py-3">{row.overdueLoans}</td></tr>)}</tbody></table></div></section>}
-        {kind === 'books' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Book inventory</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} titles</p></div><div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Publisher</th><th className="px-4 py-3">Grade</th><th className="px-4 py-3">Shelf</th><th className="px-4 py-3">Copies available / total</th><th className="px-4 py-3">Delivered</th><th className="px-5 py-3">Published</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author || book.category}</p></td><td className="px-4 py-3">{book.isbn || '—'}</td><td className="px-4 py-3">{book.publisher || '—'}</td><td className="px-4 py-3">{book.grade || '—'}</td><td className="px-4 py-3">{book.shelf}</td><td className="px-4 py-3">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3">{book.deliveredOn || '—'}</td><td className="px-5 py-3">{book.publishedOn || '—'}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={8} message="No books match this search." />}</tbody></table></div></section>}
+        {kind === 'books' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Book inventory</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} titles</p></div><div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Publisher</th><th className="px-4 py-3">Grade</th><th className="px-4 py-3">Shelf</th><th className="px-4 py-3">Copies available / total</th><th className="px-4 py-3">Delivered</th><th className="px-5 py-3">Publication year</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author || book.category}</p></td><td className="px-4 py-3">{book.isbn || '—'}</td><td className="px-4 py-3">{book.publisher || '—'}</td><td className="px-4 py-3">{book.grade || '—'}</td><td className="px-4 py-3">{book.shelf}</td><td className="px-4 py-3">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3">{book.deliveredOn || '—'}</td><td className="px-5 py-3">{book.publicationYear || '—'}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={8} message="No books match this search." />}</tbody></table></div></section>}
         {['overdue', 'returned'].includes(kind) && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">{kind === 'overdue' ? 'Overdue loans' : 'Returned-loan history'}</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.rows.length.toLocaleString()} records{readyReport.truncated ? ' (showing first 20,000; narrow filters to view fewer)' : ''}</p></div><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Borrower</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Book / copy code</th><th className="px-4 py-3">Issued / due</th>{kind === 'returned' && <th className="px-4 py-3">Returned</th>}<th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.rows.map((row) => <tr key={row.id}><td className="px-5 py-3"><span className="font-bold">{row.memberName}</span><span className="ml-2 text-[#929d94]">{row.membershipNumber}</span></td><td className="px-4 py-3">{row.memberType} · {row.classSection || '—'}</td><td className="px-4 py-3">{row.bookTitle}<p className="mt-1 text-[#929d94]">{row.copyCode || 'No copy code'} · ISBN {row.isbn}</p></td><td className="px-4 py-3">{row.issuedAt} / {row.dueDate}</td>{kind === 'returned' && <td className="px-4 py-3">{row.returnedAt}</td>}<td className="px-5 py-3">{row.status}</td></tr>)}{readyReport.rows.length === 0 && <EmptyRow colSpan={kind === 'returned' ? 6 : 5} message={kind === 'overdue' ? 'No overdue loans match these filters.' : 'No returned loans match these filters.'} />}</tbody></table></div></section>}
         {kind === 'nonBorrowers' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Members who have never borrowed</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length.toLocaleString()} members</p></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Name</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Membership</th><th className="px-4 py-3">Contact</th><th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((person) => <tr key={person.id}><td className="px-5 py-3 font-bold">{person.name}</td><td className="px-4 py-3">{person.memberType} · {person.classSection || '—'}</td><td className="px-4 py-3">{person.membershipNumber}</td><td className="px-4 py-3">{person.email || person.phone || '—'}</td><td className="px-5 py-3">{person.status}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="Every matching member has borrowed a book." />}</tbody></table></div></section>}
         {kind === 'popular' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Most-borrowed books</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length.toLocaleString()} titles sorted by total checkouts</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Category / shelf</th><th className="px-4 py-3">Total loans</th><th className="px-5 py-3">Unique borrowers</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author}</p></td><td className="px-4 py-3">{book.isbn}</td><td className="px-4 py-3">{book.category} · {book.shelf}</td><td className="px-4 py-3">{book.totalLoans}</td><td className="px-5 py-3">{book.uniqueBorrowers}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No borrowing records match these filters." />}</tbody></table></div></section>}

@@ -95,7 +95,7 @@ This changes the single librarian account's username and bcrypt password without
 - GS Busanza student directory for S1A–S6MCE classes and a separate teacher directory
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
 - Name, membership-number, class, and member-type search and filters
-- Book checkout with an optional physical copy/accession code, return, and overdue tracking
+- Book checkout with an optional physical copy/accession code, student/teacher loan limits (1/300 active books), return, and overdue tracking
 - Borrower counts and filtered circulation/class reports
 - Audit history for library actions
 - JWT sign-in, hashed staff passwords, and Administrator/Librarian permissions
@@ -119,10 +119,14 @@ In **Reports**, choose and generate loan activity, overdue loans, returned-loan 
 Use **Book collection → CSV template** to download the book import format, then **Import books** to upload it. Each row creates one catalog title with the supplied number of copies. The template headers are:
 
 ```csv
-title,isbn,publisher,author,total_copies,date_delivered,date_of_publication,grade,shelf_location,category
+title,isbn,publisher,author,total_copies,date_delivered,publication_year,grade,shelf_location,category
 ```
 
-The title and total copy count are required. ISBN, publisher, author, delivery/publication dates, grade, shelf location, and category may be blank. Dates must use `YYYY-MM-DD`; an ISBN already in the catalog or repeated in the same file is skipped and reported. Imports accept up to 5,000 rows. Individual book details can also be entered or edited with **Book collection → Add a book**.
+The title and total copy count are required. ISBN, publisher, author, delivery date, publication year, grade, shelf location, and category may be blank. Delivery dates use `YYYY-MM-DD`; publication year is a four-digit year. An ISBN already in the catalog or repeated in the same file is skipped and reported. Imports accept up to 5,000 rows. Individual book details can also be entered or edited with **Book collection → Add a book**.
+
+The header includes a sun/moon button to switch between light and dark themes. Your choice is saved in this browser.
+
+At checkout, each student may have at most **1 active book** at a time and each teacher at most **300 active books**. The API enforces these limits as well as the checkout form.
 
 When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and a code already on an unreturned loan cannot be checked out again until that copy is returned.
 
