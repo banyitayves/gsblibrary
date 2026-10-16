@@ -1,3 +1,3 @@
 @echo off
-cd /d C:\workspace\library-management-system\backend
-.venv\Scripts\python.exe app.py
+cd /d "%~dp0"
+call npm.cmd run start --workspace=backend

@@ -1,18 +1,20 @@
-# Node / frontend
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
 frontend/node_modules/
+backend/node_modules/
 frontend/dist/
 frontend/.vite/
-# Python / backend
-backend/.venv/
-backend/__pycache__/
-backend/**/*.pyc
-backend/**/*.pyo
-backend/.pytest_cache/
 
 # OS / editor
 .DS_Store
 Thumbs.db
 .vscode/
+*.swp
 
 # Logs
 *.log

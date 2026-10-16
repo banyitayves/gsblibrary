@@ -1,17 +1,23 @@
-* {
-  box-sizing: border-box;
+@import "tailwindcss";
+
+@theme {
+  --font-sans: Inter, "Segoe UI", sans-serif;
 }
 
 html {
-  font-family: Inter, 'Segoe UI', sans-serif;
-  background: #f3f6fb;
+  min-width: 360px;
+  background: #f7f8f5;
+  font-family: Inter, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
-  margin: 0;
+  min-width: 360px;
   min-height: 100vh;
-  background: #f3f6fb;
-  color: #10213a;
+  margin: 0;
 }
 
 button,
@@ -20,13 +26,37 @@ select {
   font: inherit;
 }
 
-#root {
-  min-height: 100vh;
+input,
+select {
+  width: 100%;
+  border: 1px solid #e5eae3;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+  color: #34443b;
+  font-size: 12px;
+  outline: none;
 }
 
-h1,
-h2,
-h3,
-p {
-  margin-top: 0;
+input:focus,
+select:focus {
+  border-color: #9db9a0;
+  box-shadow: 0 0 0 3px rgb(96 132 106 / 10%);
+}
+
+input::placeholder {
+  color: #a0aaa2;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: #dce9dc;
+  color: #284737;
 }
