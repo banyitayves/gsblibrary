@@ -95,7 +95,7 @@ function validateMember(data) {
   }
 }
 
-function reportFilters(query, includeStatus = true) {
+function reportFilters(query, includeStatus = true, dateColumn = 'l.issued_at') {
   const conditions = []
   const params = []
   const from = String(query.from || '')
@@ -105,11 +105,11 @@ function reportFilters(query, includeStatus = true) {
   }
   if (from && to && from > to) return { error: 'The start date must not be after the end date.' }
   if (from) {
-    conditions.push('l.issued_at >= ?')
+    conditions.push(`${dateColumn} >= ?`)
     params.push(from)
   }
   if (to) {
-    conditions.push('l.issued_at < DATE_ADD(?, INTERVAL 1 DAY)')
+    conditions.push(`${dateColumn} < DATE_ADD(?, INTERVAL 1 DAY)`)
     params.push(to)
   }
 
@@ -537,9 +537,10 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
 }))
 
 app.get('/api/reports', ...staff, asyncRoute(async (req, res) => {
-  const filters = reportFilters(req.query)
+  const dateColumn = req.query.status === 'Returned' ? 'l.returned_at' : 'l.issued_at'
+  const filters = reportFilters(req.query, true, dateColumn)
   if (filters.error) return res.status(400).json({ error: filters.error })
-  const summaryFilters = reportFilters(req.query, false)
+  const summaryFilters = reportFilters(req.query, false, dateColumn)
   if (summaryFilters.error) return res.status(400).json({ error: summaryFilters.error })
   const [rows] = await pool.execute(
     `${loanReportSelect} ${filters.where} ORDER BY l.issued_at DESC, m.name LIMIT 20000`,
@@ -638,6 +639,60 @@ app.get('/api/reports/classes', ...staff, asyncRoute(async (req, res) => {
     params,
   )
   res.json(classes.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === 'bigint' || typeof value === 'number' ? Number(value) : value]))))
+}))
+
+app.get('/api/reports/non-borrowers', ...staff, asyncRoute(async (req, res) => {
+  const conditions = ['NOT EXISTS (SELECT 1 FROM loans l WHERE l.member_id = m.id)']
+  const params = []
+  const search = String(req.query.search || '').trim()
+  if (search) {
+    const term = `%${search}%`
+    conditions.push('(m.name LIKE ? OR m.membership_number LIKE ? OR m.email LIKE ? OR m.phone LIKE ?)')
+    params.push(term, term, term, term)
+  }
+  const memberType = String(req.query.memberType || '').trim()
+  if (memberType && !['Student', 'Teacher'].includes(memberType)) {
+    return res.status(400).json({ error: 'Choose Student or Teacher.' })
+  }
+  if (memberType) {
+    conditions.push('m.member_type = ?')
+    params.push(memberType)
+  }
+  const classSection = String(req.query.classSection || '').trim().toUpperCase()
+  if (classSection) {
+    if (!schoolClasses.includes(classSection)) return res.status(400).json({ error: 'Select a valid student class.' })
+    conditions.push('m.class_section = ?')
+    params.push(classSection)
+  }
+  const [people] = await pool.execute(
+    `SELECT m.id, m.name, m.membership_number AS membershipNumber, m.email, m.phone,
+       m.member_type AS memberType, m.class_section AS classSection, m.status,
+       DATE_FORMAT(m.joined_at, '%Y-%m-%d') AS joinedAt
+     FROM members m WHERE ${conditions.join(' AND ')}
+     ORDER BY m.member_type, m.class_section, m.name LIMIT 20000`,
+    params,
+  )
+  res.json(people.map((person) => ({ ...person, id: Number(person.id) })))
+}))
+
+app.get('/api/reports/popular-books', ...staff, asyncRoute(async (req, res) => {
+  const filters = reportFilters(req.query, false)
+  if (filters.error) return res.status(400).json({ error: filters.error })
+  const [books] = await pool.execute(
+    `SELECT b.id, b.isbn, b.title, b.author, b.category, b.shelf,
+       COUNT(l.id) AS totalLoans, COUNT(DISTINCT l.member_id) AS uniqueBorrowers
+     FROM loans l JOIN books b ON b.id = l.book_id JOIN members m ON m.id = l.member_id
+     ${filters.where}
+     GROUP BY b.id, b.isbn, b.title, b.author, b.category, b.shelf
+     ORDER BY totalLoans DESC, b.title LIMIT 20000`,
+    filters.params,
+  )
+  res.json(books.map((book) => ({
+    ...book,
+    id: Number(book.id),
+    totalLoans: Number(book.totalLoans),
+    uniqueBorrowers: Number(book.uniqueBorrowers),
+  })))
 }))
 
 app.get('/api/export/people.csv', ...staff, asyncRoute(async (req, res) => {

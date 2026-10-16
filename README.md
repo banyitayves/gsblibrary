@@ -96,7 +96,7 @@ This changes the single librarian account's username and bcrypt password without
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
 - Name, membership-number, class, and member-type search and filters
 - Book checkout with an optional physical copy/accession code, return, and overdue tracking
-- Borrower counts and filtered circulation/class reports with CSV export
+- Borrower counts and filtered circulation/class reports
 - Audit history for library actions
 - JWT sign-in, hashed staff passwords, and Administrator/Librarian permissions
 
@@ -112,13 +112,13 @@ For students, set `member_type` to `Student` and `class_section` to one of `S1A`
 
 ### Separate reports
 
-In **Reports**, select which output to generate: loan activity (filterable by active/overdue/returned status, member type, class, date, person, book, ISBN, or copy code), student/teacher borrowing totals, borrowing by class, or book inventory. Each report can be exported separately as CSV.
+In **Reports**, choose and generate loan activity, overdue loans, returned-loan history, student/teacher borrowing totals, members who have never borrowed, borrowing by class, most-borrowed books, book inventory, or book availability (including out-of-stock books). Reports support the relevant member, class, date, and search filters. Export the generated result as CSV, PDF, or an Excel workbook.
 
 When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and a code already on an unreturned loan cannot be checked out again until that copy is returned.
 
 ### Automatic email and WhatsApp notifications
 
-Automatic notifications are disabled. Email sending needs a configured mail provider; WhatsApp via Twilio is not free for production and requires an approved/verified WhatsApp sender, recipient consent, and billable Twilio/Meta message fees. No Twilio account or sender was created or connected.
+Automatic notifications are disabled. Email sending needs a configured mail provider; WhatsApp via Twilio is not free for production and requires an approved/verified WhatsApp sender, recipient consent, and billable Twilio/Meta message fees. No Twilio account or sender was created or connected. Unofficial WhatsApp Web/QR wrappers are not used; they can expose linked-session credentials, violate WhatsApp terms, and cause the linked number to be restricted or banned.
 
 ### Apply the school-directory database migration
 
