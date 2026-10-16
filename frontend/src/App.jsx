@@ -329,6 +329,7 @@ function App() {
   }
 
   async function returnLoan(loan) {
+    if (!window.confirm(`Are you sure you want to mark “${loan.bookTitle}” returned by ${loan.memberName}?`)) return
     setBusy(true)
     try {
       await api(`/loans/${loan.id}/return`, { method: 'POST' })
