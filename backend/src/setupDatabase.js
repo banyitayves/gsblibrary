@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { createConnection } from 'mysql2/promise'
 import bcrypt from 'bcryptjs'
 import { config } from './config.js'
-import { pool } from './db.js'
+import { databaseSsl, pool } from './db.js'
 
 const demoBooks = [
   ['BK-1024', 'The Pragmatic Programmer', 'Andrew Hunt', 'Technology', 'A1-12', 5, '1999-10-20'],
@@ -117,6 +117,7 @@ async function setupDatabase() {
     port: config.database.port,
     user: config.database.user,
     password: config.database.password,
+    ssl: databaseSsl,
   })
 
   try {

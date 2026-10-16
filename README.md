@@ -50,18 +50,20 @@ This repository deploys as a single Vercel project containing two services, so c
 
 The frontend sends same-origin requests to `/api/*`; Vercel routes those requests to the backend. There is no frontend-to-backend server call, so no internal service binding is needed.
 
-Vercel functions **cannot connect to the MySQL server on your computer**. Before production deployment, provision a MySQL database from a provider reachable over the internet, create the `library_management` database and an app user, and initialize its tables from your computer using that provider's connection details in the root `.env` and `npm.cmd run db:setup`. Keep your database password, root password, and JWT secret private; do not commit `.env`.
+Vercel functions **cannot connect to the MySQL server on your computer**. For a no-cost start, TiDB Cloud Starter offers a MySQL-compatible mode. Create a MySQL-compatible instance, enable its public endpoint, and add the provider's **AWS Access** firewall rule for Vercel. Do not leave `Allow_all_public_connections` enabled. Set the instance's monthly spending limit to `$0` to stay within its free quota; the instance can be throttled after the quota is reached.
+
+Initialize the hosted database from a trusted computer by configuring the provider's connection details in the root `.env` and running `npm.cmd run db:setup`. This script creates `library_management`, its tables, and sample records. For TiDB Starter, use the generated connection username and set `DB_SSL=true`; the setup script uses the same TLS configuration as the API. Keep the database password and JWT secret private; do not commit `.env`.
 
 In **Vercel → Project → Settings → Environment Variables**, configure these values for each environment you deploy:
 
 | Name | Value |
 | --- | --- |
 | `DB_HOST` | Managed MySQL server hostname only (not a URL) |
-| `DB_PORT` | MySQL server port, usually `3306` |
+| `DB_PORT` | Database server port (`4000` for TiDB Cloud Starter) |
 | `DB_USER` | Dedicated application database user |
 | `DB_PASSWORD` | Application user's password |
 | `DB_NAME` | Database name, e.g. `library_management` |
-| `DB_SSL` | `true` when required by the MySQL provider, otherwise `false` |
+| `DB_SSL` | `true` when required by the database provider (`true` for TiDB Cloud Starter) |
 | `JWT_SECRET` | Unique random value of at least 32 characters |
 
 If your provider requires a custom certificate, also set `DB_SSL_CA` to its CA certificate. Vercel automatically supplies the deployed URL for CORS. Optionally set `CLIENT_URL` to an additional allowed frontend origin.
