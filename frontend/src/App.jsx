@@ -112,9 +112,10 @@ function App() {
   const [visits, setVisits] = useState([])
   const [visitSummary, setVisitSummary] = useState(null)
   const [visitDate, setVisitDate] = useState(today())
-  const [visitForm, setVisitForm] = useState({ memberId: '', bookId: '' })
+  const [visitForm, setVisitForm] = useState({ memberId: '', memberSearch: '', bookId: '', bookSearch: '' })
   const [activity, setActivity] = useState([])
   const [search, setSearch] = useState('')
+  const [attendanceSearch, setAttendanceSearch] = useState('')
   const [memberTypeFilter, setMemberTypeFilter] = useState('All')
   const [classFilter, setClassFilter] = useState('All')
   const [loanFilter, setLoanFilter] = useState('All')
@@ -339,7 +340,7 @@ function App() {
           visitDate,
         }),
       })
-      setVisitForm({ memberId: '', bookId: '' })
+      setVisitForm({ memberId: '', memberSearch: '', bookId: '', bookSearch: '' })
       notify('Library attendance recorded.')
       await loadAttendance(visitDate)
     } catch (error) {
@@ -688,6 +689,8 @@ function App() {
               setDate={setVisitDate}
               form={visitForm}
               setForm={setVisitForm}
+              attendanceSearch={attendanceSearch}
+              setAttendanceSearch={setAttendanceSearch}
               busy={busy}
               onRecord={recordVisit}
               onExport={() => downloadCsv(`/export/library-visits.csv?date=${encodeURIComponent(visitDate)}`, `gs-busanza-library-attendance-${visitDate}.csv`)}
@@ -1110,8 +1113,35 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
   )
 }
 
-function LibraryAttendance({ members, books, visits, summary, date, setDate, form, setForm, busy, onRecord, onExport }) {
+function LibraryAttendance({ members, books, visits, summary, date, setDate, form, setForm, attendanceSearch, setAttendanceSearch, busy, onRecord, onExport }) {
   const activeMembers = members.filter((member) => member.status === 'Active')
+  const memberOptions = activeMembers.map((member) => ({
+    id: String(member.id),
+    label: `${member.name} · ${member.memberType}${member.classSection ? ` · ${member.classSection}` : ''} · ${member.membershipNumber}`,
+    search: `${member.name} ${member.memberType} ${member.classSection || ''} ${member.membershipNumber}`,
+  }))
+  const bookOptions = books.map((book) => ({
+    id: String(book.id),
+    label: `${book.title}${book.isbn ? ` · ISBN ${book.isbn}` : ''} · ${book.shelf || 'No shelf'} · #${book.id}`,
+    search: `${book.title} ${book.isbn || ''} ${book.author || ''} ${book.publisher || ''} ${book.shelf || ''}`,
+  }))
+  const visibleMembers = memberOptions.filter((member) => !form.memberSearch || member.search.toLowerCase().includes(form.memberSearch.toLowerCase()))
+  const visibleBooks = bookOptions.filter((book) => !form.bookSearch || book.search.toLowerCase().includes(form.bookSearch.toLowerCase()))
+  const filteredVisits = visits.filter((visit) => (
+    `${visit.memberName} ${visit.memberType} ${visit.classSection || ''} ${visit.membershipNumber} ${visit.bookTitle || ''}`
+      .toLowerCase()
+      .includes(attendanceSearch.trim().toLowerCase())
+  ))
+
+  function updateSearch(field, options, value) {
+    const selected = options.find((option) => option.label.toLowerCase() === value.trim().toLowerCase())
+    setForm((current) => ({
+      ...current,
+      [field === 'memberSearch' ? 'memberId' : 'bookId']: selected?.id || '',
+      [field]: value,
+    }))
+  }
+
   return (
     <>
       <PageHeading eyebrow="Record each library visit" title="Library attendance" description="Check in students and teachers, note what they are reading, and see your most frequent visitors.">
@@ -1129,16 +1159,14 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
         <div className="mb-4"><h3 className="text-sm font-bold">Check in a library visitor</h3><p className="mt-1 text-[10px] text-[#929d94]">This records attendance and reading activity only; it does not check a book out.</p></div>
         <form className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[1.3fr_1.3fr_1fr_auto]" onSubmit={onRecord}>
           <Field label="Student or teacher">
-            <select required value={form.memberId} onChange={(event) => setForm((current) => ({ ...current, memberId: event.target.value }))}>
-              <option value="">Choose visitor</option>
-              {activeMembers.map((member) => <option key={member.id} value={member.id}>{member.name} · {member.memberType}{member.classSection ? ` · ${member.classSection}` : ''} · {member.membershipNumber}</option>)}
-            </select>
+            <input required list="attendance-members" autoComplete="off" placeholder="Search student or teacher…" value={form.memberSearch} onChange={(event) => updateSearch('memberSearch', memberOptions, event.target.value)} />
+            <datalist id="attendance-members">{visibleMembers.map((member) => <option key={member.id} value={member.label} />)}</datalist>
+            {form.memberId && <span className="mt-1 block text-[9px] text-[#587461]">Visitor selected</span>}
           </Field>
           <Field label="Book being read (optional)">
-            <select value={form.bookId} onChange={(event) => setForm((current) => ({ ...current, bookId: event.target.value }))}>
-              <option value="">Not recording a book</option>
-              {books.map((book) => <option key={book.id} value={book.id}>{book.title}{book.isbn ? ` · ${book.isbn}` : ''}</option>)}
-            </select>
+            <input list="attendance-books" autoComplete="off" placeholder="Search book title, ISBN, author…" value={form.bookSearch} onChange={(event) => updateSearch('bookSearch', bookOptions, event.target.value)} />
+            <datalist id="attendance-books">{visibleBooks.map((book) => <option key={book.id} value={book.label} />)}</datalist>
+            <span className="mt-1 block text-[9px] text-[#929d94]">{form.bookId ? 'Book selected' : 'Optional — leave blank if needed'}</span>
           </Field>
           <Field label="Visit date"><input required type="date" max={today()} value={date} onChange={(event) => setDate(event.target.value)} /></Field>
           <ActionButton type="submit" disabled={busy} icon={ClipboardCheck}>{busy ? 'Recording…' : 'Record visit'}</ActionButton>
@@ -1168,15 +1196,18 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
       </section>
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0eb] px-5 py-4">
-          <div><h3 className="text-sm font-bold">Visit register</h3><p className="mt-1 text-[10px] text-[#929d94]">{date} · {visits.length} {visits.length === 1 ? 'visit' : 'visits'}</p></div>
-          <button onClick={onExport} className="flex items-center gap-1.5 rounded-lg border border-[#e8ece6] px-3 py-2 text-[10px] font-bold text-[#607667] hover:bg-[#f7f8f5]"><Download size={13} /> Download this day</button>
+          <div><h3 className="text-sm font-bold">Visit register</h3><p className="mt-1 text-[10px] text-[#929d94]">{date} · {filteredVisits.length}{attendanceSearch.trim() ? ` of ${visits.length}` : ''} {filteredVisits.length === 1 ? 'visit' : 'visits'}</p></div>
+          <div className="flex flex-wrap items-center gap-2">
+            <SearchBox value={attendanceSearch} onChange={setAttendanceSearch} placeholder="Search names or books…" />
+            <button onClick={onExport} className="flex items-center gap-1.5 rounded-lg border border-[#e8ece6] px-3 py-2 text-[10px] font-bold text-[#607667] hover:bg-[#f7f8f5]"><Download size={13} /> Download this day</button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left">
             <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3">Time</th><th className="px-4 py-3">Visitor</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Membership no.</th><th className="px-5 py-3">Reading</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {visits.map((visit) => <tr key={visit.id}><td className="px-5 py-3 text-[10px] text-[#748078]">{visit.visitTime}</td><td className="px-4 py-3 text-[11px] font-bold">{visit.memberName}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{visit.memberType}{visit.classSection ? ` · ${visit.classSection}` : ''}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{visit.membershipNumber}</td><td className="px-5 py-3 text-[10px] text-[#748078]">{visit.bookTitle || 'Not recorded'}</td></tr>)}
-              {visits.length === 0 && <EmptyRow colSpan={5} message="No visits recorded for this date. Check in the next visitor above." />}
+              {filteredVisits.map((visit) => <tr key={visit.id}><td className="px-5 py-3 text-[10px] text-[#748078]">{visit.visitTime}</td><td className="px-4 py-3 text-[11px] font-bold">{visit.memberName}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{visit.memberType}{visit.classSection ? ` · ${visit.classSection}` : ''}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{visit.membershipNumber}</td><td className="px-5 py-3 text-[10px] text-[#748078]">{visit.bookTitle || 'Not recorded'}</td></tr>)}
+              {filteredVisits.length === 0 && <EmptyRow colSpan={5} message={visits.length === 0 ? 'No visits recorded for this date. Check in the next visitor above.' : 'No visits match this name or book search.'} />}
             </tbody>
           </table>
         </div>

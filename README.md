@@ -117,7 +117,7 @@ In **Reports**, choose and generate loan activity, overdue loans, returned-loan 
 
 ### Library attendance
 
-Open **Library attendance** to record each student or teacher entering the library and optionally note the book they are reading. This is an attendance record, not a checkout, so it does not change book availability or loan limits. The page lists visits by selected date, summarizes today and the last 30 days, ranks frequent visitors, and shows the most-recorded reading books. Download the daily register as a CSV file.
+Open **Library attendance** to record each student or teacher entering the library and optionally note the book they are reading. Search by name, class, or membership number to select a visitor; search by title, ISBN, author, or shelf to select a book. Search the selected day's visit register by visitor name, membership number, class, or reading title. This is an attendance record, not a checkout, so it does not change book availability or loan limits. The page lists visits by selected date, summarizes today and the last 30 days, ranks frequent visitors, and shows the most-recorded reading books. Download the daily register as a CSV file.
 
 ### Book catalog CSV files
 
