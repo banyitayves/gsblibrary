@@ -110,7 +110,7 @@ Download either CSV template from **Students & teachers**. Both templates use th
 name,member_type,class_section,membership_number,email,phone
 ```
 
-For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email, phone, and membership number may be blank; missing numbers are generated. Duplicate membership numbers and email addresses are skipped and reported. Phone values are stored for directory use only; automated notifications remain off. Imports accept up to 5,000 rows per file.
+For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email, phone, and membership number may be blank; missing numbers are generated. Duplicate membership numbers, email addresses, and matching names in the same member type and class are skipped and reported, both within the CSV and against existing members. Phone values are stored for directory use only; automated notifications remain off. Imports accept up to 5,000 rows per file.
 
 ### Separate reports
 

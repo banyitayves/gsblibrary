@@ -556,6 +556,7 @@ app.post('/api/members/import', ...canManage, asyncRoute(async (req, res) => {
   const invalid = []
   const seenNumbers = new Set()
   const seenEmails = new Set()
+  const seenIdentities = new Set()
   const expectedType = String(req.query.type || '').trim()
   if (expectedType && !['Student', 'Teacher'].includes(expectedType)) {
     return res.status(400).json({ error: 'Import type must be Student or Teacher.' })
@@ -577,19 +578,21 @@ app.post('/api/members/import', ...canManage, asyncRoute(async (req, res) => {
         invalid.push({ line, reason: `This import expects ${expectedType.toLowerCase()} records.` })
         continue
       }
-      if (seenNumbers.has(value.membershipNumber) || (value.email && seenEmails.has(value.email))) {
-        skipped.push({ line, reason: 'Duplicate membership number or email in this file.' })
+      const identityKey = [value.memberType, value.classSection || '', value.name.trim().toLocaleLowerCase()].join('|')
+      if (seenNumbers.has(value.membershipNumber) || (value.email && seenEmails.has(value.email)) || seenIdentities.has(identityKey)) {
+        skipped.push({ line, reason: 'This member is duplicated in the CSV by membership number, email, or name and class.' })
         continue
       }
-      seenNumbers.add(value.membershipNumber)
-      if (value.email) seenEmails.add(value.email)
       const [[duplicate]] = await connection.execute(
         `SELECT membership_number FROM members
-         WHERE membership_number = ? OR (? IS NOT NULL AND email = ?) LIMIT 1`,
-        [value.membershipNumber, value.email, value.email],
+         WHERE membership_number = ?
+            OR (? IS NOT NULL AND email = ?)
+            OR (LOWER(TRIM(name)) = LOWER(?) AND member_type = ? AND COALESCE(class_section, '') = ?)
+         LIMIT 1`,
+        [value.membershipNumber, value.email, value.email, value.name, value.memberType, value.classSection || ''],
       )
       if (duplicate) {
-        skipped.push({ line, reason: 'Membership number or email already exists.' })
+        skipped.push({ line, reason: 'This member already exists by membership number, email, or name and class.' })
         continue
       }
       await connection.execute(
@@ -597,6 +600,9 @@ app.post('/api/members/import', ...canManage, asyncRoute(async (req, res) => {
          VALUES (?, ?, ?, ?, ?, ?)`,
         [value.membershipNumber, value.name, value.email, value.phone, value.memberType, value.classSection],
       )
+      seenNumbers.add(value.membershipNumber)
+      if (value.email) seenEmails.add(value.email)
+      seenIdentities.add(identityKey)
       imported.push({ line, name: value.name, memberType: value.memberType })
     }
     await audit(connection, req.user.name, 'Members imported', `Imported ${imported.length} school member(s)`)
