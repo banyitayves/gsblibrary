@@ -130,9 +130,10 @@ function reportFilters(query, includeStatus = true, dateColumn = 'l.issued_at') 
     params.push(query.memberType)
   }
   if (includeStatus) {
-    if (query.status === 'Active') conditions.push('l.returned_at IS NULL AND l.due_date >= CURRENT_DATE()')
-    else if (query.status === 'Overdue') conditions.push('l.returned_at IS NULL AND l.due_date < CURRENT_DATE()')
+    if (query.status === 'Active') conditions.push('l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date >= CURRENT_DATE()')
+    else if (query.status === 'Overdue') conditions.push('l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()')
     else if (query.status === 'Returned') conditions.push('l.returned_at IS NOT NULL')
+    else if (query.status === 'Missed') conditions.push('l.missed_at IS NOT NULL')
     else if (query.status && query.status !== 'All') return { error: 'Choose a valid report status.' }
   }
   return { where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params }
@@ -144,7 +145,9 @@ const loanReportSelect = `SELECT l.id, b.title AS bookTitle, b.isbn,
   DATE_FORMAT(l.issued_at, '%Y-%m-%d') AS issuedAt,
   DATE_FORMAT(l.due_date, '%Y-%m-%d') AS dueDate,
   DATE_FORMAT(l.returned_at, '%Y-%m-%d') AS returnedAt,
-  CASE WHEN l.returned_at IS NOT NULL THEN 'Returned'
+  DATE_FORMAT(l.missed_at, '%Y-%m-%d') AS missedAt,
+  CASE WHEN l.missed_at IS NOT NULL THEN 'Missed'
+       WHEN l.returned_at IS NOT NULL THEN 'Returned'
        WHEN l.due_date < CURRENT_DATE() THEN 'Overdue' ELSE 'Active' END AS status
   FROM loans l JOIN books b ON b.id = l.book_id JOIN members m ON m.id = l.member_id`
 
@@ -271,8 +274,8 @@ app.get('/api/dashboard', ...staff, asyncRoute(async (_req, res) => {
     `SELECT
       (SELECT COALESCE(SUM(total_copies), 0) FROM books) AS totalBooks,
       (SELECT COALESCE(SUM(available_copies), 0) FROM books) AS availableBooks,
-      (SELECT COUNT(*) FROM loans WHERE returned_at IS NULL) AS activeLoans,
-      (SELECT COUNT(*) FROM loans WHERE returned_at IS NULL AND due_date < CURRENT_DATE()) AS overdueLoans,
+      (SELECT COUNT(*) FROM loans WHERE returned_at IS NULL AND missed_at IS NULL) AS activeLoans,
+      (SELECT COUNT(*) FROM loans WHERE returned_at IS NULL AND missed_at IS NULL AND due_date < CURRENT_DATE()) AS overdueLoans,
       (SELECT COUNT(*) FROM members WHERE status = 'Active') AS activeMembers`,
   )
   const [monthlyRows] = await pool.query(
@@ -417,7 +420,7 @@ app.put('/api/books/:id', ...canManage, asyncRoute(async (req, res) => {
     await connection.beginTransaction()
     const [[book]] = await connection.execute(
       `SELECT b.id, b.available_copies,
-       (SELECT COUNT(*) FROM loans WHERE book_id = b.id AND returned_at IS NULL) AS borrowed
+       (SELECT COUNT(*) FROM loans WHERE book_id = b.id AND returned_at IS NULL AND missed_at IS NULL) AS borrowed
        FROM books b WHERE b.id = ? FOR UPDATE`,
       [req.params.id],
     )
@@ -482,7 +485,7 @@ app.get('/api/members', ...staff, asyncRoute(async (req, res) => {
     `SELECT m.id, m.membership_number AS membershipNumber, m.name, m.email, m.phone,
        m.member_type AS memberType, m.class_section AS classSection, m.status,
        DATE_FORMAT(m.joined_at, '%Y-%m-%d') AS joinedAt,
-       (SELECT COUNT(*) FROM loans l WHERE l.member_id = m.id AND l.returned_at IS NULL) AS activeLoans,
+       (SELECT COUNT(*) FROM loans l WHERE l.member_id = m.id AND l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
        (SELECT COUNT(*) FROM loans l WHERE l.member_id = m.id) AS totalLoans
      FROM members m
      WHERE m.name LIKE ? OR m.email LIKE ? OR m.phone LIKE ? OR m.membership_number LIKE ? OR m.class_section LIKE ?
@@ -665,11 +668,12 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
   const filter = req.query.status
   const overdueOnly = filter === 'Overdue'
   const activeOnly = filter === 'Active'
+  const missedOnly = filter === 'Missed'
   const where = overdueOnly
-    ? 'WHERE l.returned_at IS NULL AND l.due_date < CURRENT_DATE()'
+    ? 'WHERE l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()'
     : activeOnly
-      ? 'WHERE l.returned_at IS NULL AND l.due_date >= CURRENT_DATE()'
-      : ''
+      ? 'WHERE l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date >= CURRENT_DATE()'
+      : missedOnly ? 'WHERE l.missed_at IS NOT NULL' : ''
   const [loans] = await pool.query(
     `SELECT l.id, b.id AS bookId, b.title AS bookTitle, b.isbn, l.copy_code AS copyCode,
        m.id AS memberId, m.name AS memberName, m.membership_number AS membershipNumber,
@@ -677,7 +681,9 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
        DATE_FORMAT(l.issued_at, '%Y-%m-%d') AS issuedAt,
        DATE_FORMAT(l.due_date, '%Y-%m-%d') AS dueDate,
        DATE_FORMAT(l.returned_at, '%Y-%m-%d') AS returnedAt,
-       CASE WHEN l.returned_at IS NOT NULL THEN 'Returned'
+       DATE_FORMAT(l.missed_at, '%Y-%m-%d') AS missedAt,
+       CASE WHEN l.missed_at IS NOT NULL THEN 'Missed'
+            WHEN l.returned_at IS NOT NULL THEN 'Returned'
             WHEN l.due_date < CURRENT_DATE() THEN 'Overdue' ELSE 'Active' END AS status
      FROM loans l JOIN books b ON b.id = l.book_id JOIN members m ON m.id = l.member_id
      ${where} ORDER BY l.issued_at DESC`,
@@ -686,7 +692,9 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
 }))
 
 app.get('/api/reports', ...staff, asyncRoute(async (req, res) => {
-  const dateColumn = req.query.status === 'Returned' ? 'l.returned_at' : 'l.issued_at'
+  const dateColumn = req.query.status === 'Returned'
+    ? 'l.returned_at'
+    : req.query.status === 'Missed' ? 'l.missed_at' : 'l.issued_at'
   const filters = reportFilters(req.query, true, dateColumn)
   if (filters.error) return res.status(400).json({ error: filters.error })
   const summaryFilters = reportFilters(req.query, false, dateColumn)
@@ -697,9 +705,10 @@ app.get('/api/reports', ...staff, asyncRoute(async (req, res) => {
   )
   const [[summary]] = await pool.execute(
     `SELECT COUNT(*) AS totalLoans,
-       SUM(l.returned_at IS NULL) AS activeLoans,
-       SUM(l.returned_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans,
+       SUM(l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
+       SUM(l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans,
        SUM(l.returned_at IS NOT NULL) AS returnedLoans,
+       SUM(l.missed_at IS NOT NULL) AS missedLoans,
        SUM(m.member_type = 'Student') AS studentLoans,
        SUM(m.member_type = 'Teacher') AS teacherLoans
      FROM loans l JOIN members m ON m.id = l.member_id
@@ -740,8 +749,8 @@ app.get('/api/reports/people', ...staff, asyncRoute(async (req, res) => {
     `SELECT m.id, m.name, m.membership_number AS membershipNumber, m.email, m.phone,
        m.member_type AS memberType, m.class_section AS classSection, m.status,
        COUNT(l.id) AS totalLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL) AS activeLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
      FROM members m LEFT JOIN loans l ON l.member_id = m.id
      ${where}
      GROUP BY m.id, m.name, m.membership_number, m.email, m.phone, m.member_type, m.class_section, m.status
@@ -778,8 +787,8 @@ app.get('/api/reports/classes', ...staff, asyncRoute(async (req, res) => {
   const [classes] = await pool.execute(
     `SELECT c.classSection, COUNT(DISTINCT m.id) AS students,
        COUNT(l.id) AS totalLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL) AS activeLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
      FROM (${classRows}) c
      LEFT JOIN members m ON m.class_section = c.classSection AND m.member_type = 'Student'
      LEFT JOIN loans l ON l.member_id = m.id${loanDateFilter.length ? ` AND ${loanDateFilter.join(' AND ')}` : ''}
@@ -872,8 +881,8 @@ app.get('/api/export/people.csv', ...staff, asyncRoute(async (req, res) => {
     `SELECT m.name, m.membership_number AS membershipNumber, m.member_type AS memberType,
        m.class_section AS classSection, m.email, m.phone, m.status,
        COUNT(l.id) AS totalLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL) AS activeLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
      FROM members m LEFT JOIN loans l ON l.member_id = m.id
      ${where}
      GROUP BY m.id, m.name, m.membership_number, m.member_type, m.class_section, m.email, m.phone, m.status
@@ -905,8 +914,8 @@ app.get('/api/export/classes.csv', ...staff, asyncRoute(async (req, res) => {
   const [classes] = await pool.execute(
     `SELECT c.classSection, COUNT(DISTINCT m.id) AS students,
        COUNT(l.id) AS totalLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL) AS activeLoans,
-       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL) AS activeLoans,
+       SUM(l.id IS NOT NULL AND l.returned_at IS NULL AND l.missed_at IS NULL AND l.due_date < CURRENT_DATE()) AS overdueLoans
      FROM (${classRows}) c
      LEFT JOIN members m ON m.class_section = c.classSection AND m.member_type = 'Student'
      LEFT JOIN loans l ON l.member_id = m.id${loanDateFilter.length ? ` AND ${loanDateFilter.join(' AND ')}` : ''}
@@ -950,7 +959,7 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
     }
     const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 1
     const [[loanCount]] = await connection.execute(
-      'SELECT COUNT(*) AS activeLoans FROM loans WHERE member_id = ? AND returned_at IS NULL',
+      'SELECT COUNT(*) AS activeLoans FROM loans WHERE member_id = ? AND returned_at IS NULL AND missed_at IS NULL',
       [memberId],
     )
     if (Number(loanCount.activeLoans) >= maximumActiveLoans) {
@@ -1163,7 +1172,7 @@ app.post('/api/loans/:id/return', ...canManage, asyncRoute(async (req, res) => {
   try {
     await connection.beginTransaction()
     const [[loan]] = await connection.execute(
-      `SELECT l.id, l.book_id AS bookId, l.returned_at AS returnedAt, b.title
+      `SELECT l.id, l.book_id AS bookId, l.returned_at AS returnedAt, l.missed_at AS missedAt, b.title
        FROM loans l JOIN books b ON b.id = l.book_id WHERE l.id = ? FOR UPDATE`,
       [req.params.id],
     )
@@ -1171,9 +1180,9 @@ app.post('/api/loans/:id/return', ...canManage, asyncRoute(async (req, res) => {
       await connection.rollback()
       return res.status(404).json({ error: 'Loan not found.' })
     }
-    if (loan.returnedAt) {
+    if (loan.returnedAt || loan.missedAt) {
       await connection.rollback()
-      return res.status(409).json({ error: 'This book has already been returned.' })
+      return res.status(409).json({ error: loan.missedAt ? 'This loan was already marked as missed.' : 'This book has already been returned.' })
     }
     await connection.execute('UPDATE loans SET returned_at = CURRENT_TIMESTAMP WHERE id = ?', [loan.id])
     await connection.execute(
@@ -1183,6 +1192,48 @@ app.post('/api/loans/:id/return', ...canManage, asyncRoute(async (req, res) => {
     await audit(connection, req.user.name, 'Book returned', `"${loan.title}" returned to the library`)
     await connection.commit()
     res.json({ message: 'Book returned successfully.' })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}))
+
+app.post('/api/loans/:id/missed', ...canManage, asyncRoute(async (req, res) => {
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[loan]] = await connection.execute(
+      `SELECT l.id, l.book_id AS bookId, l.member_id AS memberId,
+       l.returned_at AS returnedAt, l.missed_at AS missedAt,
+       b.title, m.name AS memberName
+       FROM loans l JOIN books b ON b.id = l.book_id
+       JOIN members m ON m.id = l.member_id
+       WHERE l.id = ? FOR UPDATE`,
+      [req.params.id],
+    )
+    if (!loan) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Loan not found.' })
+    }
+    if (loan.returnedAt || loan.missedAt) {
+      await connection.rollback()
+      return res.status(409).json({ error: loan.missedAt ? 'This loan was already marked as missed.' : 'A returned book cannot be marked as missed.' })
+    }
+    const [[book]] = await connection.execute(
+      'SELECT total_copies FROM books WHERE id = ? FOR UPDATE',
+      [loan.bookId],
+    )
+    if (!book || Number(book.total_copies) < 1) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'The catalog copy count cannot be reduced for this loan.' })
+    }
+    await connection.execute('UPDATE loans SET missed_at = CURRENT_TIMESTAMP WHERE id = ?', [loan.id])
+    await connection.execute('UPDATE books SET total_copies = total_copies - 1 WHERE id = ?', [loan.bookId])
+    await audit(connection, req.user.name, 'Book marked missed', `"${loan.title}" marked missed by ${loan.memberName}; one copy removed from the catalog`)
+    await connection.commit()
+    res.json({ message: 'Book marked as missed; one copy was removed from the catalog.' })
   } catch (error) {
     await connection.rollback()
     throw error
@@ -1228,7 +1279,10 @@ app.get('/api/export/members.csv', ...staff, asyncRoute(async (_req, res) => {
 }))
 
 app.get('/api/export/reports.csv', ...staff, asyncRoute(async (req, res) => {
-  const filters = reportFilters(req.query)
+  const dateColumn = req.query.status === 'Returned'
+    ? 'l.returned_at'
+    : req.query.status === 'Missed' ? 'l.missed_at' : 'l.issued_at'
+  const filters = reportFilters(req.query, true, dateColumn)
   if (filters.error) return res.status(400).json({ error: filters.error })
   const [rows] = await pool.execute(
     `${loanReportSelect} ${filters.where} ORDER BY l.issued_at DESC, m.name`,
@@ -1236,7 +1290,7 @@ app.get('/api/export/reports.csv', ...staff, asyncRoute(async (req, res) => {
   )
   const columns = [
     'issuedAt', 'memberName', 'membershipNumber', 'memberType', 'classSection',
-    'email', 'bookTitle', 'isbn', 'copyCode', 'dueDate', 'returnedAt', 'status',
+    'email', 'bookTitle', 'isbn', 'copyCode', 'dueDate', 'returnedAt', 'missedAt', 'status',
   ]
   res.type('text/csv').attachment('gs-busanza-library-report.csv').send(csvDocument(columns, rows))
 }))

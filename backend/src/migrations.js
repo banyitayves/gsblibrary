@@ -83,6 +83,9 @@ export async function migrateSchoolDirectory(connection) {
   if (!loanColumns.some((column) => column.COLUMN_NAME === 'copy_code')) {
     await connection.query('ALTER TABLE loans ADD COLUMN copy_code VARCHAR(64) NULL')
   }
+  if (!loanColumns.some((column) => column.COLUMN_NAME === 'missed_at')) {
+    await connection.query('ALTER TABLE loans ADD COLUMN missed_at TIMESTAMP NULL DEFAULT NULL')
+  }
   const [loanIndexes] = await connection.execute(
     `SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'loans'`,

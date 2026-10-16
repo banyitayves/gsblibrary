@@ -134,6 +134,8 @@ The header includes a sun/moon button to switch between light and dark themes. Y
 
 At checkout, each student may have at most **1 active book** at a time and each teacher at most **300 active books**. The API enforces these limits as well as the checkout form.
 
+If a checked-out book is lost, use **Loans & returns → Mark missed**. Confirming this closes the loan, reduces the book title's total inventory by one without increasing available copies, and records who had the book. Missed loans appear in the **Missed books** report and can be filtered by name, class, book, and date, then downloaded as CSV, PDF, or Excel.
+
 When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports. A code cannot be checked out again while that same code for the same title is on an unreturned loan; different titles may use the same code.
 
 ### Automatic email and WhatsApp notifications
@@ -148,7 +150,7 @@ Before deploying school-directory or book catalog changes to an existing databas
 npm.cmd run db:migrate:directory
 ```
 
-It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code to loan records, creates the library attendance table, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
+It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code and missed-book tracking to loan records, creates the library attendance table, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
 For a deployed Vercel database, an authenticated Librarian or Administrator can apply the same idempotent migration with `POST /api/admin/migrations/school-directory` and a Bearer token.
 
 ## Other commands

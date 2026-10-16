@@ -55,7 +55,7 @@ const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,
 const reportDefinitions = {
   loans: {
     title: 'Loan activity',
-    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Email', 'email'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Returned', 'returnedAt'], ['Status', 'status']],
+    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Email', 'email'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Returned', 'returnedAt'], ['Missed', 'missedAt'], ['Status', 'status']],
   },
   overdue: {
     title: 'Overdue loans',
@@ -64,6 +64,10 @@ const reportDefinitions = {
   returned: {
     title: 'Returned-loan history',
     columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Returned', 'returnedAt'], ['Status', 'status']],
+  },
+  missed: {
+    title: 'Missed books',
+    columns: [['Borrower', 'memberName'], ['Membership number', 'membershipNumber'], ['Member type', 'memberType'], ['Class', 'classSection'], ['Book', 'bookTitle'], ['ISBN', 'isbn'], ['Copy code', 'copyCode'], ['Issued', 'issuedAt'], ['Due', 'dueDate'], ['Marked missed', 'missedAt'], ['Status', 'status']],
   },
   people: {
     title: 'Student and teacher borrowing',
@@ -342,6 +346,20 @@ function App() {
     }
   }
 
+  async function markLoanMissed(loan) {
+    if (!window.confirm(`Mark the copy of “${loan.bookTitle}” borrowed by ${loan.memberName} as missed? One copy will be removed from the book's total inventory.`)) return
+    setBusy(true)
+    try {
+      await api(`/loans/${loan.id}/missed`, { method: 'POST' })
+      notify(`“${loan.bookTitle}” was marked missed and removed from inventory.`)
+      await loadData()
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function recordVisit(event) {
     event.preventDefault()
     if (!visitForm.memberId) {
@@ -470,9 +488,10 @@ function App() {
         if (key !== 'availability' && value && value !== 'All') params.set(key, value)
       }
       let data
-      if (kind === 'loans' || kind === 'overdue' || kind === 'returned') {
+      if (kind === 'loans' || kind === 'overdue' || kind === 'returned' || kind === 'missed') {
         if (kind === 'overdue') params.set('status', 'Overdue')
         if (kind === 'returned') params.set('status', 'Returned')
+        if (kind === 'missed') params.set('status', 'Missed')
         data = await api(`/reports?${params}`)
       }
       else if (kind === 'people') data = await api(`/reports/people?${params}`)
@@ -500,7 +519,7 @@ function App() {
     if (!reportData || reportData.kind !== reportKind) return
     try {
       const definition = reportDefinitions[reportKind]
-      const sourceRows = ['loans', 'overdue', 'returned'].includes(reportKind) ? reportData.data.rows : reportData.data
+      const sourceRows = ['loans', 'overdue', 'returned', 'missed'].includes(reportKind) ? reportData.data.rows : reportData.data
       const rows = sourceRows.map((record) => definition.columns.map(([, key]) => record[key] ?? ''))
       const headers = definition.columns.map(([label]) => label)
       const filename = `gs-busanza-${reportKind.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}-report`
@@ -712,6 +731,7 @@ function App() {
               setFilter={setLoanFilter}
               onIssue={() => setModal({ type: 'loan' })}
               onReturn={returnLoan}
+              onMissed={markLoanMissed}
               busy={busy}
             />
           )}
@@ -1094,6 +1114,7 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
     ['loans', 'Loan activity'],
     ['overdue', 'Overdue loans'],
     ['returned', 'Returned-loan history'],
+    ['missed', 'Missed books'],
     ['people', 'Student & teacher borrowing'],
     ['nonBorrowers', 'Members who have never borrowed'],
     ['classes', 'Class borrowing'],
@@ -1114,21 +1135,22 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
       <section className="mb-5 grid gap-3 rounded-2xl border border-[#e9ede7] bg-white p-5 sm:grid-cols-2 xl:grid-cols-3">
         <Field label="Report type"><select value={kind} onChange={(event) => setKind(event.target.value)}>{reportOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
         {kind !== 'classes' && <Field label={['books', 'availability', 'popular'].includes(kind) ? 'Search title, author, ISBN or book' : 'Search name or membership number'}><input value={filters.search} onChange={(event) => update('search', event.target.value)} placeholder="Enter a name, number, title, ISBN or code" /></Field>}
-        {['loans', 'overdue', 'returned', 'people', 'nonBorrowers', 'popular'].includes(kind) && <Field label="Member type"><select value={filters.memberType} onChange={(event) => update('memberType', event.target.value)}><option>All</option><option>Student</option><option>Teacher</option></select></Field>}
-        {['loans', 'overdue', 'returned', 'people', 'nonBorrowers', 'popular'].includes(kind) && <Field label="Class"><select value={filters.classSection} onChange={(event) => update('classSection', event.target.value)}><option>All</option>{schoolClasses.map((section) => <option key={section}>{section}</option>)}</select></Field>}
-        {kind === 'loans' && <Field label="Loan status"><select value={filters.status} onChange={(event) => update('status', event.target.value)}><option>All</option><option>Active</option><option>Overdue</option><option>Returned</option></select></Field>}
+        {['loans', 'overdue', 'returned', 'missed', 'people', 'nonBorrowers', 'popular'].includes(kind) && <Field label="Member type"><select value={filters.memberType} onChange={(event) => update('memberType', event.target.value)}><option>All</option><option>Student</option><option>Teacher</option></select></Field>}
+        {['loans', 'overdue', 'returned', 'missed', 'people', 'nonBorrowers', 'popular'].includes(kind) && <Field label="Class"><select value={filters.classSection} onChange={(event) => update('classSection', event.target.value)}><option>All</option>{schoolClasses.map((section) => <option key={section}>{section}</option>)}</select></Field>}
+        {kind === 'loans' && <Field label="Loan status"><select value={filters.status} onChange={(event) => update('status', event.target.value)}><option>All</option><option>Active</option><option>Overdue</option><option>Returned</option><option>Missed</option></select></Field>}
         {kind === 'availability' && <Field label="Availability"><select value={filters.availability} onChange={(event) => update('availability', event.target.value)}><option>All</option><option>Available</option><option>Out of stock</option></select></Field>}
-        {['loans', 'overdue', 'returned', 'classes', 'popular'].includes(kind) && <Field label="From date"><input type="date" value={filters.from} onChange={(event) => update('from', event.target.value)} /></Field>}
-        {['loans', 'overdue', 'returned', 'classes', 'popular'].includes(kind) && <Field label="To date"><input type="date" value={filters.to} onChange={(event) => update('to', event.target.value)} /></Field>}
+        {['loans', 'overdue', 'returned', 'missed', 'classes', 'popular'].includes(kind) && <Field label="From date"><input type="date" value={filters.from} onChange={(event) => update('from', event.target.value)} /></Field>}
+        {['loans', 'overdue', 'returned', 'missed', 'classes', 'popular'].includes(kind) && <Field label="To date"><input type="date" value={filters.to} onChange={(event) => update('to', event.target.value)} /></Field>}
       </section>
       {!readyReport ? <section className="rounded-2xl border border-dashed border-[#dfe6dd] bg-white p-10 text-center text-sm text-[#829087]">Choose a report type and filters, then generate it.</section> : <>
         {kind === 'loans' && <>
-        <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
           {[
             ['All loans', readyReport.summary.totalLoans],
             ['Active', readyReport.summary.activeLoans],
             ['Overdue', readyReport.summary.overdueLoans],
             ['Returned', readyReport.summary.returnedLoans],
+            ['Missed books', readyReport.summary.missedLoans],
             ['Student loans', readyReport.summary.studentLoans],
             ['Teacher loans', readyReport.summary.teacherLoans],
           ].map(([label, value]) => <article key={label} className="rounded-2xl border border-[#e9ede7] bg-white p-4"><p className="text-[10px] font-semibold text-[#7c887f]">{label}</p><p className="mt-2 text-2xl font-bold">{Number(value).toLocaleString()}</p></article>)}
@@ -1141,7 +1163,7 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
         {kind === 'people' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Student & teacher borrowing</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} people</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Name</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Membership</th><th className="px-4 py-3">Total loans</th><th className="px-5 py-3">Active / overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((person) => <tr key={person.id}><td className="px-5 py-3 font-bold">{person.name}</td><td className="px-4 py-3">{person.memberType} · {person.classSection || '—'}</td><td className="px-4 py-3">{person.membershipNumber}</td><td className="px-4 py-3">{person.totalLoans}</td><td className="px-5 py-3">{person.activeLoans} / {person.overdueLoans}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No borrowers match these filters." />}</tbody></table></div></section>}
         {kind === 'classes' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Class borrowing summary</h2><p className="mt-1 text-[10px] text-[#929d94]">Student counts and loans for all 23 classes.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[580px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Class</th><th className="px-4 py-3">Students</th><th className="px-4 py-3">Loans</th><th className="px-4 py-3">Active</th><th className="px-5 py-3">Overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((row) => <tr key={row.classSection}><td className="px-5 py-3 font-bold">{row.classSection}</td><td className="px-4 py-3">{row.students}</td><td className="px-4 py-3">{row.totalLoans}</td><td className="px-4 py-3">{row.activeLoans}</td><td className="px-5 py-3">{row.overdueLoans}</td></tr>)}</tbody></table></div></section>}
         {kind === 'books' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Book inventory</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} titles</p></div><div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Publisher</th><th className="px-4 py-3">Grade</th><th className="px-4 py-3">Shelf</th><th className="px-4 py-3">Copies available / total</th><th className="px-4 py-3">Delivered</th><th className="px-5 py-3">Publication year</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author || book.category}</p></td><td className="px-4 py-3">{book.isbn || '—'}</td><td className="px-4 py-3">{book.publisher || '—'}</td><td className="px-4 py-3">{book.grade || '—'}</td><td className="px-4 py-3">{book.shelf}</td><td className="px-4 py-3">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3">{book.deliveredOn || '—'}</td><td className="px-5 py-3">{book.publicationYear || '—'}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={8} message="No books match this search." />}</tbody></table></div></section>}
-        {['overdue', 'returned'].includes(kind) && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">{kind === 'overdue' ? 'Overdue loans' : 'Returned-loan history'}</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.rows.length.toLocaleString()} records{readyReport.truncated ? ' (showing first 20,000; narrow filters to view fewer)' : ''}</p></div><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Borrower</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Book / copy code</th><th className="px-4 py-3">Issued / due</th>{kind === 'returned' && <th className="px-4 py-3">Returned</th>}<th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.rows.map((row) => <tr key={row.id}><td className="px-5 py-3"><span className="font-bold">{row.memberName}</span><span className="ml-2 text-[#929d94]">{row.membershipNumber}</span></td><td className="px-4 py-3">{row.memberType} · {row.classSection || '—'}</td><td className="px-4 py-3">{row.bookTitle}<p className="mt-1 text-[#929d94]">{row.copyCode || 'No copy code'} · ISBN {row.isbn}</p></td><td className="px-4 py-3">{row.issuedAt} / {row.dueDate}</td>{kind === 'returned' && <td className="px-4 py-3">{row.returnedAt}</td>}<td className="px-5 py-3">{row.status}</td></tr>)}{readyReport.rows.length === 0 && <EmptyRow colSpan={kind === 'returned' ? 6 : 5} message={kind === 'overdue' ? 'No overdue loans match these filters.' : 'No returned loans match these filters.'} />}</tbody></table></div></section>}
+        {['overdue', 'returned', 'missed'].includes(kind) && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">{kind === 'overdue' ? 'Overdue loans' : kind === 'returned' ? 'Returned-loan history' : 'Missed books'}</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.rows.length.toLocaleString()} records{readyReport.truncated ? ' (showing first 20,000; narrow filters to view fewer)' : ''}</p></div><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Borrower</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Book / copy code</th><th className="px-4 py-3">Issued / due</th>{kind === 'returned' && <th className="px-4 py-3">Returned</th>}{kind === 'missed' && <th className="px-4 py-3">Marked missed</th>}<th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.rows.map((row) => <tr key={row.id}><td className="px-5 py-3"><span className="font-bold">{row.memberName}</span><span className="ml-2 text-[#929d94]">{row.membershipNumber}</span></td><td className="px-4 py-3">{row.memberType} · {row.classSection || '—'}</td><td className="px-4 py-3">{row.bookTitle}<p className="mt-1 text-[#929d94]">{row.copyCode || 'No copy code'} · ISBN {row.isbn}</p></td><td className="px-4 py-3">{row.issuedAt} / {row.dueDate}</td>{kind === 'returned' && <td className="px-4 py-3">{row.returnedAt}</td>}{kind === 'missed' && <td className="px-4 py-3">{row.missedAt}</td>}<td className="px-5 py-3">{row.status}</td></tr>)}{readyReport.rows.length === 0 && <EmptyRow colSpan={kind === 'returned' || kind === 'missed' ? 6 : 5} message={kind === 'overdue' ? 'No overdue loans match these filters.' : kind === 'returned' ? 'No returned loans match these filters.' : 'No missed books match these filters.'} />}</tbody></table></div></section>}
         {kind === 'nonBorrowers' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Members who have never borrowed</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length.toLocaleString()} members</p></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Name</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Membership</th><th className="px-4 py-3">Contact</th><th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((person) => <tr key={person.id}><td className="px-5 py-3 font-bold">{person.name}</td><td className="px-4 py-3">{person.memberType} · {person.classSection || '—'}</td><td className="px-4 py-3">{person.membershipNumber}</td><td className="px-4 py-3">{person.email || person.phone || '—'}</td><td className="px-5 py-3">{person.status}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="Every matching member has borrowed a book." />}</tbody></table></div></section>}
         {kind === 'popular' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Most-borrowed books</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length.toLocaleString()} titles sorted by total checkouts</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Category / shelf</th><th className="px-4 py-3">Total loans</th><th className="px-5 py-3">Unique borrowers</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author}</p></td><td className="px-4 py-3">{book.isbn}</td><td className="px-4 py-3">{book.category} · {book.shelf}</td><td className="px-4 py-3">{book.totalLoans}</td><td className="px-5 py-3">{book.uniqueBorrowers}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No borrowing records match these filters." />}</tbody></table></div></section>}
         {kind === 'availability' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Books available in the library</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length.toLocaleString()} books{filters.availability !== 'All' ? ` · ${filters.availability}` : ''}</p></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Category / shelf</th><th className="px-4 py-3">Available / total</th><th className="px-5 py-3">Availability</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author}</p></td><td className="px-4 py-3">{book.isbn}</td><td className="px-4 py-3">{book.category} · {book.shelf}</td><td className="px-4 py-3">{book.availableCopies} / {book.totalCopies}</td><td className="px-5 py-3">{book.availability}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No books match this availability filter." />}</tbody></table></div></section>}
@@ -1253,7 +1275,7 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
   )
 }
 
-function Loans({ loans, filter, setFilter, onIssue, onReturn, busy }) {
+function Loans({ loans, filter, setFilter, onIssue, onReturn, onMissed, busy }) {
   return (
     <>
       <PageHeading eyebrow="Every story has a return date" title="Loans & returns" description="Keep track of books finding their way back home.">
@@ -1262,7 +1284,7 @@ function Loans({ loans, filter, setFilter, onIssue, onReturn, busy }) {
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0eb] px-5 py-4">
           <div className="flex gap-1 rounded-xl bg-[#f5f7f3] p-1">
-            {['All', 'Active', 'Overdue', 'Returned'].map((status) => <button key={status} onClick={() => setFilter(status)} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${filter === status ? 'bg-white text-[#415b48] shadow-sm' : 'text-[#8a958c] hover:text-[#46584b]'}`}>{status}</button>)}
+            {['All', 'Active', 'Overdue', 'Missed', 'Returned'].map((status) => <button key={status} onClick={() => setFilter(status)} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${filter === status ? 'bg-white text-[#415b48] shadow-sm' : 'text-[#8a958c] hover:text-[#46584b]'}`}>{status}</button>)}
           </div>
           <span className="text-[10px] text-[#929d94]">{loans.length} {loans.length === 1 ? 'record' : 'records'}</span>
         </div>
@@ -1270,7 +1292,17 @@ function Loans({ loans, filter, setFilter, onIssue, onReturn, busy }) {
           <table className="w-full min-w-[720px] text-left">
             <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Book</th><th className="px-4 py-3.5">Member</th><th className="px-4 py-3.5">Checked out</th><th className="px-4 py-3.5">Due date</th><th className="px-4 py-3.5">Status</th><th className="px-5 py-3.5 text-right">Action</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {loans.map((loan, index) => <tr key={loan.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="text-[11px] font-bold">{loan.bookTitle}</p><p className="mt-1 text-[9px] text-[#929d94]">ISBN {loan.isbn} · Copy {loan.copyCode || 'not recorded'}</p></div></div></td><td className="px-4 py-4"><p className="text-[10px] font-semibold">{loan.memberName}</p><p className="mt-1 text-[9px] text-[#929d94]">{loan.membershipNumber}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.issuedAt}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.dueDate}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${loan.status === 'Returned' ? 'bg-[#f1f2ef] text-[#858f87]' : loan.status === 'Overdue' ? 'bg-[#f9eee9] text-[#b46d53]' : 'bg-[#edf4ed] text-[#64846b]'}`}>{loan.status}</span></td><td className="px-5 py-4 text-right">{loan.status !== 'Returned' && <button disabled={busy} onClick={() => onReturn(loan)} className="rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Mark returned</button>}{loan.status === 'Returned' && <span className="text-[10px] text-[#a0aaa2]">All done <Check className="ml-1 inline" size={12} /></span>}</td></tr>)}
+              {loans.map((loan, index) => {
+                const active = loan.status === 'Active' || loan.status === 'Overdue'
+                const statusClass = loan.status === 'Returned'
+                  ? 'bg-[#f1f2ef] text-[#858f87]'
+                  : loan.status === 'Missed'
+                    ? 'bg-[#f8e8e4] text-[#a34d37]'
+                    : loan.status === 'Overdue'
+                      ? 'bg-[#f9eee9] text-[#b46d53]'
+                      : 'bg-[#edf4ed] text-[#64846b]'
+                return <tr key={loan.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="text-[11px] font-bold">{loan.bookTitle}</p><p className="mt-1 text-[9px] text-[#929d94]">ISBN {loan.isbn} · Copy {loan.copyCode || 'not recorded'}</p></div></div></td><td className="px-4 py-4"><p className="text-[10px] font-semibold">{loan.memberName}</p><p className="mt-1 text-[9px] text-[#929d94]">{loan.membershipNumber}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.issuedAt}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.dueDate}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${statusClass}`}>{loan.status}</span></td><td className="space-x-1 px-5 py-4 text-right">{active && <><button disabled={busy} onClick={() => onMissed(loan)} className="rounded-lg bg-[#f8e8e4] px-3 py-2 text-[10px] font-bold text-[#a34d37] hover:bg-[#f2d9d2] disabled:opacity-50">Mark missed</button><button disabled={busy} onClick={() => onReturn(loan)} className="rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Mark returned</button></>}{!active && <span className="text-[10px] text-[#a0aaa2]">{loan.status === 'Missed' ? 'Marked missed' : <>All done <Check className="ml-1 inline" size={12} /></>}</span>}</td></tr>
+              })}
               {loans.length === 0 && <EmptyRow colSpan={6} message={filter === 'All' ? 'No loans yet. Check out a book to get started.' : `No ${filter.toLowerCase()} loans right now.`} />}
             </tbody>
           </table>

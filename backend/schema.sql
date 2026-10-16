@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS loans (
   issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   due_date DATE NOT NULL,
   returned_at TIMESTAMP NULL DEFAULT NULL,
+  missed_at TIMESTAMP NULL DEFAULT NULL,
   copy_code VARCHAR(64) NULL,
   INDEX idx_loans_due_date (due_date),
   INDEX idx_loans_member (member_id),
