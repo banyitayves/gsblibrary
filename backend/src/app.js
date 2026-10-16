@@ -169,7 +169,7 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase()
   const password = String(req.body?.password || '')
   if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required.' })
+    return res.status(400).json({ error: 'Username and password are required.' })
   }
   const [users] = await pool.execute(
     'SELECT id, name, email, password_hash, role FROM users WHERE email = ? LIMIT 1',
@@ -177,7 +177,7 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
   )
   const user = users[0]
   if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-    return res.status(401).json({ error: 'Email or password is incorrect.' })
+    return res.status(401).json({ error: 'Username or password is incorrect.' })
   }
 
   requireJwtSecret()
@@ -187,6 +187,52 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
 }))
 
 app.get('/api/auth/me', ...staff, (_req, res) => res.json({ user: _req.user }))
+
+app.post('/api/auth/change-credentials', ...staff, asyncRoute(async (req, res) => {
+  const currentPassword = String(req.body?.currentPassword || '')
+  const username = String(req.body?.username || '').trim().toLowerCase()
+  const password = String(req.body?.password || '')
+  if (!currentPassword || !username || username.length > 190 || !password || Buffer.byteLength(password, 'utf8') < 12 || Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(400).json({ error: 'Current password, a username up to 190 characters, and a new password of 12–72 bytes are required.' })
+  }
+
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[account]] = await connection.execute(
+      'SELECT id, name, email, password_hash, role FROM users WHERE id = ? FOR UPDATE',
+      [req.user.id],
+    )
+    if (!account || !(await bcrypt.compare(currentPassword, account.password_hash))) {
+      await connection.rollback()
+      return res.status(401).json({ error: 'Current password is incorrect.' })
+    }
+    const [[existing]] = await connection.execute(
+      'SELECT id FROM users WHERE email = ? AND id <> ? LIMIT 1',
+      [username, account.id],
+    )
+    if (existing) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'That username is already in use.' })
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12)
+    const name = account.role === 'Librarian' ? 'NSHIMIYIMANA Yves' : account.name
+    await connection.execute(
+      'UPDATE users SET name = ?, email = ?, password_hash = ? WHERE id = ?',
+      [name, username, passwordHash, account.id],
+    )
+    await audit(connection, name, 'Staff login changed', `Updated sign-in credentials for ${name}`)
+    await connection.commit()
+    res.json({ message: 'Your username and password have been updated. Sign in again to continue.' })
+  } catch (error) {
+    await connection.rollback()
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'That username is already in use.' })
+    throw error
+  } finally {
+    connection.release()
+  }
+}))
 
 app.get('/api/dashboard', ...staff, asyncRoute(async (_req, res) => {
   const [[summary]] = await pool.query(

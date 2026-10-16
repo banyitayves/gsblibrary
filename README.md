@@ -73,6 +73,7 @@ After saving or changing environment variables, **redeploy** so the backend serv
 ## Staff sign-in
 
 Use the librarian username and password set for your school deployment. Login accepts a username; it does not need to be an email address.
+Signed-in staff can rotate their own credentials with `POST /api/auth/change-credentials` using `currentPassword`, `username`, and `password`. The request requires a new password between 12 and 72 UTF-8 bytes and stores only its bcrypt hash.
 
 For an existing database, change the librarian login from a trusted machine using environment variables (do not put the password in source control):
 
