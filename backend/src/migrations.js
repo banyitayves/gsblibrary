@@ -5,6 +5,28 @@ const directoryColumns = [
 ]
 
 export async function migrateSchoolDirectory(connection) {
+  const [bookColumns] = await connection.execute(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'books'`,
+  )
+  const existingBookColumns = new Set(bookColumns.map((column) => column.COLUMN_NAME))
+  if (!existingBookColumns.has('isbn')) {
+    throw new Error('The books.isbn column is missing; cannot migrate the book catalog.')
+  }
+  await connection.query('ALTER TABLE books MODIFY isbn VARCHAR(32) NULL')
+  if (existingBookColumns.has('author')) {
+    await connection.query('ALTER TABLE books MODIFY author VARCHAR(180) NULL')
+  }
+  for (const [name, definition] of [
+    ['publisher', 'VARCHAR(180) NULL'],
+    ['grade', 'VARCHAR(40) NULL'],
+    ['delivered_on', 'DATE NULL'],
+  ]) {
+    if (!existingBookColumns.has(name)) {
+      await connection.query(`ALTER TABLE books ADD COLUMN ${name} ${definition}`)
+    }
+  }
+
   const [columns] = await connection.execute(
     `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'members'`,

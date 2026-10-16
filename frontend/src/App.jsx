@@ -40,12 +40,13 @@ const navigation = [
   { id: 'Reports', label: 'Reports', icon: FileBarChart },
 ]
 
-const initialBook = { isbn: '', title: '', author: '', category: '', shelf: '', totalCopies: 1, publishedOn: '' }
+const initialBook = { isbn: '', title: '', author: '', publisher: '', category: '', grade: '', shelf: '', totalCopies: 1, deliveredOn: '', publishedOn: '' }
 const today = () => {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 const memberCsvHeaders = 'name,member_type,class_section,membership_number,email,phone'
+const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,date_of_publication,grade,shelf_location,category'
 const reportDefinitions = {
   loans: {
     title: 'Loan activity',
@@ -73,15 +74,15 @@ const reportDefinitions = {
   },
   popular: {
     title: 'Most-borrowed books',
-    columns: [['Title', 'title'], ['Author', 'author'], ['ISBN', 'isbn'], ['Category', 'category'], ['Shelf', 'shelf'], ['Total loans', 'totalLoans'], ['Unique borrowers', 'uniqueBorrowers']],
+    columns: [['Title', 'title'], ['Author', 'author'], ['ISBN', 'isbn'], ['Publisher', 'publisher'], ['Grade', 'grade'], ['Category', 'category'], ['Shelf', 'shelf'], ['Total loans', 'totalLoans'], ['Unique borrowers', 'uniqueBorrowers']],
   },
   books: {
     title: 'Book inventory',
-    columns: [['Title', 'title'], ['Author', 'author'], ['ISBN', 'isbn'], ['Category', 'category'], ['Shelf', 'shelf'], ['Available copies', 'availableCopies'], ['Total copies', 'totalCopies']],
+    columns: [['Title', 'title'], ['ISBN', 'isbn'], ['Publisher', 'publisher'], ['Grade', 'grade'], ['Shelf', 'shelf'], ['Available copies', 'availableCopies'], ['Total copies', 'totalCopies'], ['Date delivered', 'deliveredOn'], ['Publication date', 'publishedOn']],
   },
   availability: {
     title: 'Book availability',
-    columns: [['Title', 'title'], ['Author', 'author'], ['ISBN', 'isbn'], ['Category', 'category'], ['Shelf', 'shelf'], ['Available copies', 'availableCopies'], ['Total copies', 'totalCopies'], ['Availability', 'availability']],
+    columns: [['Title', 'title'], ['ISBN', 'isbn'], ['Publisher', 'publisher'], ['Grade', 'grade'], ['Shelf', 'shelf'], ['Available copies', 'availableCopies'], ['Total copies', 'totalCopies'], ['Date delivered', 'deliveredOn'], ['Publication date', 'publishedOn'], ['Availability', 'availability']],
   },
 }
 const userFromSession = () => {
@@ -112,6 +113,7 @@ function App() {
   const [reportKind, setReportKind] = useState('loans')
   const [reportFilters, setReportFilters] = useState({ search: '', memberType: 'All', classSection: 'All', status: 'All', availability: 'Available', from: '', to: '' })
   const [importResult, setImportResult] = useState(null)
+  const [bookImportResult, setBookImportResult] = useState(null)
   const [modal, setModal] = useState(null)
   const [bookForm, setBookForm] = useState(initialBook)
   const [memberForm, setMemberForm] = useState({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
@@ -164,7 +166,7 @@ function App() {
   const filteredBooks = useMemo(() => {
     const term = search.trim().toLowerCase()
     return books.filter((book) =>
-      [book.title, book.author, book.isbn, book.category, book.shelf].join(' ').toLowerCase().includes(term),
+      [book.title, book.author, book.publisher, book.isbn, book.category, book.grade, book.shelf].join(' ').toLowerCase().includes(term),
     )
   }, [books, search])
 
@@ -320,6 +322,25 @@ function App() {
       })
       setImportResult({ memberType, ...result })
       notify(`Imported ${result.imported} ${memberType.toLowerCase()} record${result.imported === 1 ? '' : 's'}.`)
+      await loadData()
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function importBooks(file) {
+    if (!file) return
+    setBusy(true)
+    try {
+      const result = await api('/books/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv' },
+        body: await file.text(),
+      })
+      setBookImportResult(result)
+      notify(`Imported ${result.imported} book title${result.imported === 1 ? '' : 's'}.`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -546,8 +567,11 @@ function App() {
               books={filteredBooks}
               search={search}
               setSearch={setSearch}
+              importResult={bookImportResult}
+              busy={busy}
+              onImport={importBooks}
               onAdd={() => { setBookForm(initialBook); setModal({ type: 'book' }) }}
-              onEdit={(book) => { setBookForm({ ...book, totalCopies: book.totalCopies, publishedOn: book.publishedOn || '' }); setModal({ type: 'book', book }) }}
+              onEdit={(book) => { setBookForm({ ...initialBook, ...book, totalCopies: book.totalCopies, deliveredOn: book.deliveredOn || '', publishedOn: book.publishedOn || '' }); setModal({ type: 'book', book }) }}
               onDelete={deleteBook}
               onExport={exportCatalog}
               canAdminister={canAdminister}
@@ -599,12 +623,15 @@ function App() {
           <form className="space-y-4" onSubmit={saveBook}>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Book title"><input required autoFocus value={bookForm.title} onChange={(event) => setBookForm({ ...bookForm, title: event.target.value })} placeholder="e.g. The Midnight Library" /></Field>
-              <Field label="Author"><input required value={bookForm.author} onChange={(event) => setBookForm({ ...bookForm, author: event.target.value })} placeholder="Author name" /></Field>
-              <Field label="ISBN"><input required value={bookForm.isbn} onChange={(event) => setBookForm({ ...bookForm, isbn: event.target.value })} placeholder="ISBN-13" /></Field>
-              <Field label="Category"><input value={bookForm.category} onChange={(event) => setBookForm({ ...bookForm, category: event.target.value })} placeholder="e.g. Fiction" /></Field>
-              <Field label="Shelf location"><input value={bookForm.shelf} onChange={(event) => setBookForm({ ...bookForm, shelf: event.target.value })} placeholder="e.g. A1-04" /></Field>
-              <Field label="Total copies"><input required type="number" min="1" max="10000" value={bookForm.totalCopies} onChange={(event) => setBookForm({ ...bookForm, totalCopies: event.target.value })} /></Field>
-              <Field label="Publication date"><input type="date" value={bookForm.publishedOn} onChange={(event) => setBookForm({ ...bookForm, publishedOn: event.target.value })} /></Field>
+              <Field label="ISBN (optional)"><input value={bookForm.isbn || ''} onChange={(event) => setBookForm({ ...bookForm, isbn: event.target.value })} placeholder="ISBN-13" /></Field>
+              <Field label="Publisher"><input value={bookForm.publisher || ''} onChange={(event) => setBookForm({ ...bookForm, publisher: event.target.value })} placeholder="Publisher name" /></Field>
+              <Field label="Number of copies"><input required type="number" min="1" max="10000" value={bookForm.totalCopies} onChange={(event) => setBookForm({ ...bookForm, totalCopies: event.target.value })} /></Field>
+              <Field label="Date delivered"><input type="date" value={bookForm.deliveredOn || ''} onChange={(event) => setBookForm({ ...bookForm, deliveredOn: event.target.value })} /></Field>
+              <Field label="Date of publication"><input type="date" value={bookForm.publishedOn || ''} onChange={(event) => setBookForm({ ...bookForm, publishedOn: event.target.value })} /></Field>
+              <Field label="Grade"><input value={bookForm.grade || ''} onChange={(event) => setBookForm({ ...bookForm, grade: event.target.value })} placeholder="e.g. S2 or Senior 4" /></Field>
+              <Field label="Shelf location"><input value={bookForm.shelf || ''} onChange={(event) => setBookForm({ ...bookForm, shelf: event.target.value })} placeholder="e.g. A1-04" /></Field>
+              <Field label="Author (optional)"><input value={bookForm.author || ''} onChange={(event) => setBookForm({ ...bookForm, author: event.target.value })} placeholder="Author name" /></Field>
+              <Field label="Category (optional)"><input value={bookForm.category || ''} onChange={(event) => setBookForm({ ...bookForm, category: event.target.value })} placeholder="e.g. Fiction" /></Field>
             </div>
             <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel={modal.book ? 'Save changes' : 'Add to collection'} />
           </form>
@@ -825,21 +852,33 @@ function SearchBox({ value, onChange, placeholder }) {
   return <label className="flex min-w-0 items-center gap-2.5 rounded-xl border border-[#e8ece6] bg-white px-3.5 py-2.5 focus-within:border-[#9db9a0] sm:w-[260px]"><Search size={15} className="shrink-0 text-[#98a39a]" /><input className="min-w-0 flex-1 border-0 bg-transparent text-[11px] outline-none placeholder:text-[#a0aaa2]" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
 }
 
-function Catalog({ books, search, setSearch, onAdd, onEdit, onDelete, onExport, canAdminister }) {
+function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd, onEdit, onDelete, onExport, canAdminister }) {
   return (
     <>
-      <PageHeading eyebrow="A world between the covers" title="Book collection" description={`${books.length} title${books.length === 1 ? '' : 's'} to explore`}>
+      <PageHeading eyebrow="Manage and import library books" title="Book collection" description={`${books.length} title${books.length === 1 ? '' : 's'} to explore`}>
         <SearchBox value={search} onChange={setSearch} placeholder="Search title, author, ISBN…" />
         <ActionButton secondary icon={Download} onClick={onExport}>Export CSV</ActionButton>
         <ActionButton onClick={onAdd}>Add a book</ActionButton>
       </PageHeading>
+      <section className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-[#e9ede7] bg-white p-4">
+        <div className="mr-auto"><p className="text-[11px] font-bold">Import books from CSV</p><p className="mt-1 text-[10px] text-[#929d94]">Upload one row per title with copy count, delivery and publication dates, grade, and shelf.</p></div>
+        <button onClick={downloadBookTemplate} className="flex items-center gap-1.5 rounded-lg border border-[#e8ece6] px-3 py-2 text-[10px] font-bold text-[#607667] hover:bg-[#f7f8f5]"><Download size={13} /> CSV template</button>
+        <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+          <Upload size={13} /> Import books
+          <input type="file" accept=".csv,text/csv" className="sr-only" disabled={busy} onChange={(event) => { onImport(event.target.files?.[0]); event.target.value = '' }} />
+        </label>
+      </section>
+      {importResult && <section role="status" className="mb-4 rounded-xl border border-[#dce8dc] bg-[#f2f7f1] px-4 py-3 text-[11px] text-[#526c58]">
+        <p className="font-bold">Book import: {importResult.imported} titles added, {importResult.skipped.length} duplicates skipped, {importResult.invalid.length} invalid rows.</p>
+        {[...importResult.skipped, ...importResult.invalid].slice(0, 5).map((row) => <p key={`${row.line}-${row.reason}`} className="mt-1">Row {row.line}: {row.reason}</p>)}
+      </section>}
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left">
-            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Book</th><th className="px-4 py-3.5">ISBN</th><th className="px-4 py-3.5">Category</th><th className="px-4 py-3.5">Location</th><th className="px-4 py-3.5">Availability</th><th className="px-4 py-3.5">Copies</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
+          <table className="w-full min-w-[1080px] text-left">
+            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Book</th><th className="px-4 py-3.5">ISBN</th><th className="px-4 py-3.5">Publisher</th><th className="px-4 py-3.5">Grade</th><th className="px-4 py-3.5">Copies</th><th className="px-4 py-3.5">Delivered</th><th className="px-4 py-3.5">Published</th><th className="px-4 py-3.5">Shelf</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {books.map((book, index) => <tr key={book.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-3"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="max-w-[220px] truncate text-[11px] font-bold">{book.title}</p><p className="mt-1 text-[10px] text-[#8b968d]">{book.author}</p></div></div></td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.isbn}</td><td className="px-4 py-3"><span className="rounded-md bg-[#f4f6f1] px-2 py-1 text-[9px] font-medium text-[#748078]">{book.category}</span></td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.shelf}</td><td className="px-4 py-3"><span className={`inline-flex items-center gap-1.5 text-[10px] font-semibold ${book.availableCopies > 0 ? 'text-[#65856c]' : 'text-[#b87660]'}`}><span className={`size-1.5 rounded-full ${book.availableCopies > 0 ? 'bg-[#76a17d]' : 'bg-[#d59a81]'}`} />{book.availableCopies > 0 ? 'Available' : 'All checked out'}</span></td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.availableCopies} / {book.totalCopies}</td><td className="px-5 py-3 text-right"><button onClick={() => onEdit(book)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed]">Edit</button>{canAdminister && <button onClick={() => onDelete(book)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9]">Remove</button>}</td></tr>)}
-              {books.length === 0 && <EmptyRow colSpan={7} message="No books found. Try another search, or add a title to your collection." />}
+              {books.map((book, index) => <tr key={book.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-3"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="max-w-[220px] truncate text-[11px] font-bold">{book.title}</p><p className="mt-1 text-[10px] text-[#8b968d]">{book.author || book.category || 'Book'}</p></div></div></td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.isbn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publisher || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.grade || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.deliveredOn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publishedOn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.shelf}</td><td className="px-5 py-3 text-right"><button onClick={() => onEdit(book)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed]">Edit</button>{canAdminister && <button onClick={() => onDelete(book)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9]">Remove</button>}</td></tr>)}
+              {books.length === 0 && <EmptyRow colSpan={9} message="No books found. Try another search, import a CSV, or add a title to your collection." />}
             </tbody>
           </table>
         </div>
@@ -903,6 +942,16 @@ function downloadMemberTemplate(memberType) {
   URL.revokeObjectURL(url)
 }
 
+function downloadBookTemplate() {
+  const content = `${bookCsvHeaders}\nExample book,9780000000000,Example Publisher,Example Author,1,2026-10-16,2020-01-01,S1,A1-04,Textbook\n`
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'gs-busanza-book-template.csv'
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onExport }) {
   const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }))
   const readyReport = report?.kind === kind && JSON.stringify(report.filters) === JSON.stringify(filters) ? report.data : null
@@ -956,7 +1005,7 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
         </>}
         {kind === 'people' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Student & teacher borrowing</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} people</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Name</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Membership</th><th className="px-4 py-3">Total loans</th><th className="px-5 py-3">Active / overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((person) => <tr key={person.id}><td className="px-5 py-3 font-bold">{person.name}</td><td className="px-4 py-3">{person.memberType} · {person.classSection || '—'}</td><td className="px-4 py-3">{person.membershipNumber}</td><td className="px-4 py-3">{person.totalLoans}</td><td className="px-5 py-3">{person.activeLoans} / {person.overdueLoans}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No borrowers match these filters." />}</tbody></table></div></section>}
         {kind === 'classes' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Class borrowing summary</h2><p className="mt-1 text-[10px] text-[#929d94]">Student counts and loans for all 23 classes.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[580px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Class</th><th className="px-4 py-3">Students</th><th className="px-4 py-3">Loans</th><th className="px-4 py-3">Active</th><th className="px-5 py-3">Overdue</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((row) => <tr key={row.classSection}><td className="px-5 py-3 font-bold">{row.classSection}</td><td className="px-4 py-3">{row.students}</td><td className="px-4 py-3">{row.totalLoans}</td><td className="px-4 py-3">{row.activeLoans}</td><td className="px-5 py-3">{row.overdueLoans}</td></tr>)}</tbody></table></div></section>}
-        {kind === 'books' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Book inventory</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} titles</p></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Category</th><th className="px-4 py-3">Shelf</th><th className="px-5 py-3">Available / total</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author}</p></td><td className="px-4 py-3">{book.isbn}</td><td className="px-4 py-3">{book.category}</td><td className="px-4 py-3">{book.shelf}</td><td className="px-5 py-3">{book.availableCopies} / {book.totalCopies}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No books match this search." />}</tbody></table></div></section>}
+        {kind === 'books' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Book inventory</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length} titles</p></div><div className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Publisher</th><th className="px-4 py-3">Grade</th><th className="px-4 py-3">Shelf</th><th className="px-4 py-3">Copies available / total</th><th className="px-4 py-3">Delivered</th><th className="px-5 py-3">Published</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author || book.category}</p></td><td className="px-4 py-3">{book.isbn || '—'}</td><td className="px-4 py-3">{book.publisher || '—'}</td><td className="px-4 py-3">{book.grade || '—'}</td><td className="px-4 py-3">{book.shelf}</td><td className="px-4 py-3">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3">{book.deliveredOn || '—'}</td><td className="px-5 py-3">{book.publishedOn || '—'}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={8} message="No books match this search." />}</tbody></table></div></section>}
         {['overdue', 'returned'].includes(kind) && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">{kind === 'overdue' ? 'Overdue loans' : 'Returned-loan history'}</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.rows.length.toLocaleString()} records{readyReport.truncated ? ' (showing first 20,000; narrow filters to view fewer)' : ''}</p></div><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Borrower</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Book / copy code</th><th className="px-4 py-3">Issued / due</th>{kind === 'returned' && <th className="px-4 py-3">Returned</th>}<th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.rows.map((row) => <tr key={row.id}><td className="px-5 py-3"><span className="font-bold">{row.memberName}</span><span className="ml-2 text-[#929d94]">{row.membershipNumber}</span></td><td className="px-4 py-3">{row.memberType} · {row.classSection || '—'}</td><td className="px-4 py-3">{row.bookTitle}<p className="mt-1 text-[#929d94]">{row.copyCode || 'No copy code'} · ISBN {row.isbn}</p></td><td className="px-4 py-3">{row.issuedAt} / {row.dueDate}</td>{kind === 'returned' && <td className="px-4 py-3">{row.returnedAt}</td>}<td className="px-5 py-3">{row.status}</td></tr>)}{readyReport.rows.length === 0 && <EmptyRow colSpan={kind === 'returned' ? 6 : 5} message={kind === 'overdue' ? 'No overdue loans match these filters.' : 'No returned loans match these filters.'} />}</tbody></table></div></section>}
         {kind === 'nonBorrowers' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Members who have never borrowed</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length.toLocaleString()} members</p></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Name</th><th className="px-4 py-3">Type / class</th><th className="px-4 py-3">Membership</th><th className="px-4 py-3">Contact</th><th className="px-5 py-3">Status</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((person) => <tr key={person.id}><td className="px-5 py-3 font-bold">{person.name}</td><td className="px-4 py-3">{person.memberType} · {person.classSection || '—'}</td><td className="px-4 py-3">{person.membershipNumber}</td><td className="px-4 py-3">{person.email || person.phone || '—'}</td><td className="px-5 py-3">{person.status}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="Every matching member has borrowed a book." />}</tbody></table></div></section>}
         {kind === 'popular' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Most-borrowed books</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length.toLocaleString()} titles sorted by total checkouts</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Category / shelf</th><th className="px-4 py-3">Total loans</th><th className="px-5 py-3">Unique borrowers</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author}</p></td><td className="px-4 py-3">{book.isbn}</td><td className="px-4 py-3">{book.category} · {book.shelf}</td><td className="px-4 py-3">{book.totalLoans}</td><td className="px-5 py-3">{book.uniqueBorrowers}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No borrowing records match these filters." />}</tbody></table></div></section>}

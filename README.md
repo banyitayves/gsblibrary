@@ -91,7 +91,7 @@ This changes the single librarian account's username and bcrypt password without
 ## Features
 
 - Dashboard with live collection, loan, member, and overdue totals
-- Searchable book catalog with add, edit, and CSV export
+- Searchable book catalog with add, edit, and CSV import/export
 - GS Busanza student directory for S1A–S6MCE classes and a separate teacher directory
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
 - Name, membership-number, class, and member-type search and filters
@@ -114,6 +114,16 @@ For students, set `member_type` to `Student` and `class_section` to one of `S1A`
 
 In **Reports**, choose and generate loan activity, overdue loans, returned-loan history, student/teacher borrowing totals, members who have never borrowed, borrowing by class, most-borrowed books, book inventory, or book availability (including out-of-stock books). Reports support the relevant member, class, date, and search filters. Export the generated result as CSV, PDF, or an Excel workbook.
 
+### Book catalog CSV files
+
+Use **Book collection → CSV template** to download the book import format, then **Import books** to upload it. Each row creates one catalog title with the supplied number of copies. The template headers are:
+
+```csv
+title,isbn,publisher,author,total_copies,date_delivered,date_of_publication,grade,shelf_location,category
+```
+
+The title and total copy count are required. ISBN, publisher, author, delivery/publication dates, grade, shelf location, and category may be blank. Dates must use `YYYY-MM-DD`; an ISBN already in the catalog or repeated in the same file is skipped and reported. Imports accept up to 5,000 rows. Individual book details can also be entered or edited with **Book collection → Add a book**.
+
 When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and a code already on an unreturned loan cannot be checked out again until that copy is returned.
 
 ### Automatic email and WhatsApp notifications
@@ -122,7 +132,7 @@ Automatic notifications are disabled. Email sending needs a configured mail prov
 
 ### Apply the school-directory database migration
 
-Before deploying these directory features to an existing database, run the idempotent migration from a trusted machine with the correct production database settings in the root `.env`:
+Before deploying school-directory or book catalog changes to an existing database, run the idempotent migration from a trusted machine with the correct production database settings in the root `.env`:
 
 ```powershell
 npm.cmd run db:migrate:directory
