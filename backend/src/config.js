@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url'
 dotenv.config({ path: fileURLToPath(new URL('../../.env', import.meta.url)) })
 
 const databaseName = process.env.DB_NAME || 'library_management'
+const clientUrls = (process.env.CLIENT_URL || 'http://localhost:5173')
+  .split(',')
+  .map((url) => url.trim().replace(/\/+$/, ''))
+  .filter(Boolean)
 
 if (!/^[a-zA-Z0-9_]+$/.test(databaseName)) {
   throw new Error('DB_NAME may only contain letters, numbers, and underscores.')
@@ -11,7 +15,7 @@ if (!/^[a-zA-Z0-9_]+$/.test(databaseName)) {
 
 export const config = {
   port: Number(process.env.PORT) || 3001,
-  clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
+  clientUrls,
   database: {
     host: process.env.DB_HOST || 'localhost',
     port: Number(process.env.DB_PORT) || 3306,
@@ -24,6 +28,8 @@ export const config = {
 
 export function requireJwtSecret() {
   if (!config.jwtSecret || config.jwtSecret.length < 32) {
-    throw new Error('Set JWT_SECRET to a random secret of at least 32 characters in the root .env file.')
+    const error = new Error('Set JWT_SECRET to a random secret of at least 32 characters in the deployment environment.')
+    error.code = 'MISSING_JWT_SECRET'
+    throw error
   }
 }

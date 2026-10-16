@@ -41,6 +41,33 @@ The bootstrap uses the installed MySQL 8.4 Server binaries, binds the database o
 
 To install MySQL Community Server separately, use the [official MySQL Installer](https://dev.mysql.com/downloads/installer/) or [Community Server downloads](https://dev.mysql.com/downloads/mysql/). If you have an existing MySQL server or data, **do not run `db:bootstrap`**: configure `.env` using [.env.example](./.env.example), create `library_management` and a least-privilege app account in MySQL Workbench, then run `npm.cmd run db:setup`.
 
+## Deploy to Vercel
+
+This repository deploys as a single Vercel project containing two services, so choose **Import multi-service project**. The included `vercel.json` defines:
+
+- `frontend`: Vite app from `frontend/`, public for all non-API paths.
+- `backend`: Express app from `backend/`, public under `/api/*`.
+
+The frontend sends same-origin requests to `/api/*`; Vercel routes those requests to the backend. There is no frontend-to-backend server call, so no internal service binding is needed.
+
+Vercel functions **cannot connect to the MySQL server on your computer**. Before production deployment, provision a MySQL database from a provider reachable over the internet, create the `library_management` database and an app user, and initialize its tables from your computer using that provider's connection details in the root `.env` and `npm.cmd run db:setup`. Keep your database password, root password, and JWT secret private; do not commit `.env`.
+
+In **Vercel → Project → Settings → Environment Variables**, configure these values for each environment you deploy:
+
+| Name | Value |
+| --- | --- |
+| `DB_HOST` | Managed MySQL server hostname only (not a URL) |
+| `DB_PORT` | MySQL server port, usually `3306` |
+| `DB_USER` | Dedicated application database user |
+| `DB_PASSWORD` | Application user's password |
+| `DB_NAME` | Database name, e.g. `library_management` |
+| `DB_SSL` | `true` when required by the MySQL provider, otherwise `false` |
+| `JWT_SECRET` | Unique random value of at least 32 characters |
+
+If your provider requires a custom certificate, also set `DB_SSL_CA` to its CA certificate. Vercel automatically supplies the deployed URL for CORS. Optionally set `CLIENT_URL` to an additional allowed frontend origin.
+
+After saving or changing environment variables, **redeploy** so the backend service receives the updated settings. Verify the deployed database/API connection at `https://<your-deployment-domain>/api/health`. A healthy deployment responds with `{"status":"ok","database":"connected"}`. Database connection problems return an API error with a message directing you to the `DB_*` and `DB_SSL` settings.
+
 ## Demo sign-in
 
 | Role | Email | Password |
