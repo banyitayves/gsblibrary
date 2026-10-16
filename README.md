@@ -60,8 +60,8 @@ In **Vercel → Project → Settings → Environment Variables**, configure thes
 | --- | --- |
 | `DB_HOST` | Managed MySQL server hostname only (not a URL) |
 | `DB_PORT` | Database server port (`4000` for TiDB Cloud Starter) |
-| `DB_USER` | Dedicated application database user |
-| `DB_PASSWORD` | Application user's password |
+| `DB_USER` | Database user (TiDB Starter uses its generated cluster username) |
+| `DB_PASSWORD` | Database user's password |
 | `DB_NAME` | Database name, e.g. `library_management` |
 | `DB_SSL` | `true` when required by the database provider (`true` for TiDB Cloud Starter) |
 | `JWT_SECRET` | Unique random value of at least 32 characters |
