@@ -976,12 +976,12 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
     }
     if (copyCode) {
       const [[existingCopy]] = await connection.execute(
-        'SELECT id FROM loans WHERE book_id = ? AND copy_code = ? AND returned_at IS NULL LIMIT 1 FOR UPDATE',
-        [bookId, copyCode],
+        'SELECT id FROM loans WHERE copy_code = ? AND returned_at IS NULL LIMIT 1 FOR UPDATE',
+        [copyCode],
       )
       if (existingCopy) {
         await connection.rollback()
-        return res.status(409).json({ error: 'That copy code for this book is already checked out.' })
+        return res.status(409).json({ error: 'That physical book copy is already checked out.' })
       }
     }
     const [result] = await connection.execute(

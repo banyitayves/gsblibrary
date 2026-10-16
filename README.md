@@ -136,7 +136,7 @@ At checkout, each student may have at most **1 active book** at a time and each 
 
 If a checked-out book is lost, use **Loans & returns → Mark missed**. Confirming this closes the loan, reduces the book title's total inventory by one without increasing available copies, and records who had the book. Missed loans appear in the **Missed books** report and can be filtered by name, class, book, and date, then downloaded as CSV, PDF, or Excel.
 
-When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports. A code cannot be checked out again while that same code for the same title is on an unreturned loan; different titles may use the same code.
+When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and the same code cannot be used on another unreturned loan until the copy is returned.
 
 ### Automatic email and WhatsApp notifications
 
