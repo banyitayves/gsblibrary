@@ -280,10 +280,27 @@ function App() {
     event.preventDefault()
     setBusy(true)
     try {
-      await api('/members', { method: 'POST', body: JSON.stringify(memberForm) })
+      await api(modal.member ? `/members/${modal.member.id}` : '/members', {
+        method: modal.member ? 'PUT' : 'POST',
+        body: JSON.stringify(memberForm),
+      })
       setModal(null)
-      setMemberForm({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
-      notify('New member registered.')
+      setMemberForm({ name: '', membershipNumber: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
+      notify(modal.member ? 'Member details updated.' : 'New member registered.')
+      await loadData()
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteMember(member) {
+    if (!window.confirm(`Delete ${member.name} (${member.membershipNumber})? Members with loan or attendance history cannot be deleted.`)) return
+    setBusy(true)
+    try {
+      await api(`/members/${member.id}`, { method: 'DELETE' })
+      notify(`${member.name} was deleted.`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -548,6 +565,7 @@ function App() {
   }
 
   const canAdminister = user.role === 'Administrator'
+  const canManageMembers = ['Administrator', 'Librarian'].includes(user.role)
   const availableBooks = books.filter((book) => book.availableCopies > 0)
   const selectedLoanMember = members.find((member) => String(member.id) === loanForm.memberId)
   const selectedMemberLimit = selectedLoanMember?.memberType === 'Teacher' ? 300 : 1
@@ -666,7 +684,21 @@ function App() {
               busy={busy}
               onImport={importMembers}
               onExport={() => downloadCsv('/export/members.csv', 'gs-busanza-members.csv')}
-              onAdd={() => { setMemberForm({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' }); setModal({ type: 'member' }) }}
+              onAdd={() => { setMemberForm({ name: '', membershipNumber: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' }); setModal({ type: 'member' }) }}
+              onEdit={(member) => {
+                setMemberForm({
+                  name: member.name,
+                  membershipNumber: member.membershipNumber,
+                  email: member.email || '',
+                  phone: member.phone || '',
+                  memberType: member.memberType,
+                  classSection: member.classSection || '',
+                })
+                setModal({ type: 'member', member })
+              }}
+              onDelete={deleteMember}
+              canManage={canManageMembers}
+              canAdminister={canAdminister}
             />
           )}
           {page === 'Loans' && (
@@ -732,16 +764,17 @@ function App() {
       )}
 
       {modal?.type === 'member' && (
-        <Modal title="Add a member" subtitle="Create a library membership record." onClose={() => setModal(null)}>
+        <Modal title={modal.member ? 'Edit member' : 'Add a member'} subtitle={modal.member ? 'Update this library membership record.' : 'Create a library membership record.'} onClose={() => setModal(null)}>
           <form className="space-y-4" onSubmit={saveMember}>
             <Field label="Full name"><input required autoFocus value={memberForm.name} onChange={(event) => setMemberForm({ ...memberForm, name: event.target.value })} placeholder="Member name" /></Field>
+            <Field label="Membership number"><input required={Boolean(modal.member)} value={memberForm.membershipNumber || ''} onChange={(event) => setMemberForm({ ...memberForm, membershipNumber: event.target.value })} placeholder={modal.member ? 'Membership number' : 'Generated automatically if blank'} /></Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Member type"><select value={memberForm.memberType} onChange={(event) => setMemberForm({ ...memberForm, memberType: event.target.value, classSection: event.target.value === 'Student' ? 'S1A' : '' })}><option>Student</option><option>Teacher</option></select></Field>
               {memberForm.memberType === 'Student' && <Field label="Class"><select required value={memberForm.classSection} onChange={(event) => setMemberForm({ ...memberForm, classSection: event.target.value })}>{schoolClasses.map((section) => <option key={section}>{section}</option>)}</select></Field>}
             </div>
             <Field label="Email address (optional)"><input type="email" value={memberForm.email} onChange={(event) => setMemberForm({ ...memberForm, email: event.target.value })} placeholder="name@example.com" /></Field>
             <Field label="Phone / WhatsApp (optional)"><input type="tel" value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: event.target.value })} placeholder="+250 7XX XXX XXX" /></Field>
-            <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Register member" />
+            <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel={modal.member ? 'Save changes' : 'Register member'} />
           </form>
         </Modal>
       )}
@@ -986,13 +1019,13 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
   )
 }
 
-function Members({ members, search, setSearch, typeFilter, setTypeFilter, classFilter, setClassFilter, importResult, busy, onImport, onExport, onAdd }) {
+function Members({ members, search, setSearch, typeFilter, setTypeFilter, classFilter, setClassFilter, importResult, busy, onImport, onExport, onAdd, onEdit, onDelete, canManage, canAdminister }) {
   return (
     <>
       <PageHeading eyebrow="GS Busanza school directory" title="Students & teachers" description={`${members.length} people match your directory filters`}>
         <SearchBox value={search} onChange={setSearch} placeholder="Search members…" />
         <ActionButton secondary icon={Download} onClick={onExport}>Export CSV</ActionButton>
-        <ActionButton onClick={onAdd}><Plus size={14} /> Add person</ActionButton>
+        {canManage && <ActionButton onClick={onAdd}><Plus size={14} /> Add person</ActionButton>}
       </PageHeading>
       <section className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-[#e9ede7] bg-white p-4">
         <label className="text-[10px] font-semibold text-[#78847c]">Type <select className="ml-2 rounded-lg border border-[#e8ece6] bg-white px-2 py-2 text-[10px]" value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value); if (event.target.value !== 'Student') setClassFilter('All') }}><option>All</option><option>Student</option><option>Teacher</option></select></label>
@@ -1016,11 +1049,11 @@ function Members({ members, search, setSearch, typeFilter, setTypeFilter, classF
       </section>}
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[780px] text-left">
-            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Student or teacher</th><th className="px-4 py-3.5">Type / class</th><th className="px-4 py-3.5">Membership no.</th><th className="px-4 py-3.5">Email</th><th className="px-4 py-3.5">Books out</th><th className="px-5 py-3.5">Status</th></tr></thead>
+          <table className="w-full min-w-[900px] text-left">
+            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Student or teacher</th><th className="px-4 py-3.5">Type / class</th><th className="px-4 py-3.5">Membership no.</th><th className="px-4 py-3.5">Email</th><th className="px-4 py-3.5">Books out</th><th className="px-4 py-3.5">Status</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {members.map((member, index) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className={`flex size-9 items-center justify-center rounded-full text-[10px] font-bold ${['bg-[#edf2e9] text-[#6b846c]', 'bg-[#f2ede6] text-[#a17e5c]', 'bg-[#eeebf4] text-[#7e719a]', 'bg-[#f4ece8] text-[#a67762]'][index % 4]}`}>{initials(member.name)}</div><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td><td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}<p className="mt-1 text-[9px] text-[#929d94]">{member.phone || 'No phone provided'}</p></td><td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td><td className="px-5 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td></tr>)}
-              {members.length === 0 && <EmptyRow colSpan={6} message="No students or teachers match these filters. Import a CSV or add a person." />}
+              {members.map((member, index) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className={`flex size-9 items-center justify-center rounded-full text-[10px] font-bold ${['bg-[#edf2e9] text-[#6b846c]', 'bg-[#f2ede6] text-[#a17e5c]', 'bg-[#eeebf4] text-[#7e719a]', 'bg-[#f4ece8] text-[#a67762]'][index % 4]}`}>{initials(member.name)}</div><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td><td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}<p className="mt-1 text-[9px] text-[#929d94]">{member.phone || 'No phone provided'}</p></td><td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td><td className="px-5 py-4 text-right">{canManage && <button disabled={busy} onClick={() => onEdit(member)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Edit</button>}{canAdminister && <button disabled={busy} onClick={() => onDelete(member)} className="ml-1 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button>}</td></tr>)}
+              {members.length === 0 && <EmptyRow colSpan={7} message="No students or teachers match these filters. Import a CSV or add a person." />}
             </tbody>
           </table>
         </div>

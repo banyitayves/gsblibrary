@@ -506,6 +506,33 @@ app.post('/api/members', ...canManage, asyncRoute(async (req, res) => {
   }
 }))
 
+app.put('/api/members/:id', ...canManage, asyncRoute(async (req, res) => {
+  const memberId = Number(req.params.id)
+  if (!Number.isSafeInteger(memberId) || memberId < 1) {
+    return res.status(400).json({ error: 'Member ID must be a positive integer.' })
+  }
+  const { value, error } = validateMember(req.body)
+  if (error) return res.status(400).json({ error })
+
+  try {
+    const [result] = await pool.execute(
+      `UPDATE members
+       SET membership_number = ?, name = ?, email = ?, phone = ?, member_type = ?, class_section = ?
+       WHERE id = ?`,
+      [value.membershipNumber, value.name, value.email, value.phone, value.memberType, value.classSection, memberId],
+    )
+    if (!result.affectedRows) {
+      const [[existing]] = await pool.execute('SELECT id FROM members WHERE id = ?', [memberId])
+      if (!existing) return res.status(404).json({ error: 'Member not found.' })
+    }
+    await audit(pool, req.user.name, 'Member updated', `Updated details for ${value.name} (${value.membershipNumber})`)
+    res.json({ id: memberId, ...value })
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'That membership number or email is already in use.' })
+    throw error
+  }
+}))
+
 app.post('/api/members/import', ...canManage, asyncRoute(async (req, res) => {
   if (typeof req.body !== 'string' || !req.body.trim()) {
     return res.status(400).json({ error: 'Upload a non-empty CSV file.' })
@@ -587,16 +614,30 @@ app.post('/api/members/import', ...canManage, asyncRoute(async (req, res) => {
 }))
 
 app.delete('/api/members/:id', ...canAdminister, asyncRoute(async (req, res) => {
+  const memberId = Number(req.params.id)
+  if (!Number.isSafeInteger(memberId) || memberId < 1) {
+    return res.status(400).json({ error: 'Member ID must be a positive integer.' })
+  }
+  const connection = await pool.getConnection()
   try {
-    const [result] = await pool.execute('DELETE FROM members WHERE id = ?', [req.params.id])
-    if (!result.affectedRows) return res.status(404).json({ error: 'Member not found.' })
-    await audit(pool, req.user.name, 'Member removed', `Removed member #${req.params.id}`)
+    await connection.beginTransaction()
+    const [[member]] = await connection.execute('SELECT name, membership_number FROM members WHERE id = ? FOR UPDATE', [memberId])
+    if (!member) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Member not found.' })
+    }
+    await connection.execute('DELETE FROM members WHERE id = ?', [memberId])
+    await audit(connection, req.user.name, 'Member removed', `Removed ${member.name} (${member.membership_number})`)
+    await connection.commit()
     res.status(204).end()
   } catch (error) {
+    await connection.rollback()
     if (error.code === 'ER_ROW_IS_REFERENCED_2') {
-      return res.status(409).json({ error: 'This member has loan history and cannot be removed.' })
+      return res.status(409).json({ error: 'This member has loan or library attendance history and cannot be deleted.' })
     }
     throw error
+  } finally {
+    connection.release()
   }
 }))
 
