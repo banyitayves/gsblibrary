@@ -131,7 +131,7 @@ function App() {
   const [modal, setModal] = useState(null)
   const [bookForm, setBookForm] = useState(initialBook)
   const [memberForm, setMemberForm] = useState({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
-  const [loanForm, setLoanForm] = useState({ bookId: '', memberId: '', quantity: '1', dueDate: '', copyCode: '' })
+  const [loanForm, setLoanForm] = useState({ bookId: '', bookSearch: '', memberId: '', memberSearch: '', quantity: '1', dueDate: '', copyCode: '' })
   const [loanActionQuantity, setLoanActionQuantity] = useState('1')
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const [busy, setBusy] = useState(false)
@@ -316,6 +316,10 @@ function App() {
 
   async function issueLoan(event) {
     event.preventDefault()
+    if (!loanForm.bookId || !loanForm.memberId) {
+      notify('Choose a book and an active student or teacher from the suggestions.')
+      return
+    }
     setBusy(true)
     try {
       await api('/loans', {
@@ -323,7 +327,7 @@ function App() {
         body: JSON.stringify({ ...loanForm, bookId: Number(loanForm.bookId), memberId: Number(loanForm.memberId), quantity: Number(loanForm.quantity) }),
       })
       setModal(null)
-      setLoanForm({ bookId: '', memberId: '', quantity: '1', dueDate: '', copyCode: '' })
+      setLoanForm({ bookId: '', bookSearch: '', memberId: '', memberSearch: '', quantity: '1', dueDate: '', copyCode: '' })
       notify(`${loanForm.quantity} ${Number(loanForm.quantity) === 1 ? 'copy' : 'copies'} checked out successfully.`)
       await loadData()
     } catch (error) {
@@ -599,7 +603,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#f7f8f5] text-[#1d302b]">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[252px] flex-col border-r border-[#e9ede7] bg-white px-5 py-6 lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-[252px] flex-col overflow-y-auto overscroll-contain border-r border-[#e9ede7] bg-white px-5 py-6 lg:flex">
         <Brand />
         <SchoolContact className="mt-4 rounded-xl bg-[#f6f8f4] px-3 py-3 text-[#65756a]" />
         <div className="mb-3 mt-10 px-3 text-[10px] font-bold uppercase tracking-[.16em] text-[#a0aba3]">Workspace</div>
@@ -731,6 +735,8 @@ function App() {
           {page === 'Loans' && (
             <Loans
               loans={filteredLoans}
+              search={search}
+              setSearch={setSearch}
               filter={loanFilter}
               setFilter={setLoanFilter}
               onIssue={() => setModal({ type: 'loan' })}
@@ -816,23 +822,62 @@ function App() {
           ) : (
             <form className="space-y-4" onSubmit={issueLoan}>
               <Field label="Book">
-                <select required value={loanForm.bookId} onChange={(event) => {
-                  const book = availableBooks.find((item) => String(item.id) === event.target.value)
-                  setLoanForm({ ...loanForm, bookId: event.target.value, quantity: String(Math.max(1, Math.min(Number(loanForm.quantity) || 1, Number(book?.availableCopies || 1)))) })
-                }}>
-                  <option value="">Choose a book</option>
-                  {availableBooks.map((book) => <option key={book.id} value={book.id}>{book.title} · {book.availableCopies} available</option>)}
-                </select>
+                <input
+                  required
+                  autoComplete="off"
+                  list="checkout-books"
+                  placeholder="Search title, ISBN, author, shelf…"
+                  value={loanForm.bookSearch || ''}
+                  onChange={(event) => {
+                    const bookSearch = event.target.value
+                    const book = availableBooks.find((item) => `${item.title} · ${item.isbn || 'No ISBN'} · ${item.author || 'No author'} · ${item.shelf || 'No shelf'} · ${item.availableCopies} available` === bookSearch)
+                    setLoanForm({
+                      ...loanForm,
+                      bookId: book ? String(book.id) : '',
+                      bookSearch,
+                      quantity: book ? String(Math.max(1, Math.min(Number(loanForm.quantity) || 1, Number(book.availableCopies)))) : loanForm.quantity,
+                    })
+                  }}
+                />
+                <datalist id="checkout-books">
+                  {availableBooks.map((book) => <option key={book.id} value={`${book.title} · ${book.isbn || 'No ISBN'} · ${book.author || 'No author'} · ${book.shelf || 'No shelf'} · ${book.availableCopies} available`} />)}
+                </datalist>
               </Field>
+              {selectedLoanBook && (
+                <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#f6f8f4] p-3 text-[10px]">
+                  <div className="col-span-2"><span className="block text-[#929d94]">Title</span><span className="mt-0.5 block font-bold">{selectedLoanBook.title}</span></div>
+                  <div><span className="block text-[#929d94]">Shelf</span><span className="mt-0.5 block font-semibold">{selectedLoanBook.shelf || 'Not recorded'}</span></div>
+                  <div><span className="block text-[#929d94]">Date delivered</span><span className="mt-0.5 block font-semibold">{selectedLoanBook.deliveredOn || 'Not recorded'}</span></div>
+                  <div><span className="block text-[#929d94]">Grade</span><span className="mt-0.5 block font-semibold">{selectedLoanBook.grade || 'Not recorded'}</span></div>
+                </div>
+              )}
               <Field label="Member">
-                <select required value={loanForm.memberId} onChange={(event) => setLoanForm({ ...loanForm, memberId: event.target.value, quantity: '1' })}>
-                  <option value="">Choose a member</option>
-                  {members.filter((member) => member.status === 'Active').map((member) => {
+                <input
+                  required
+                  autoComplete="off"
+                  list="checkout-members"
+                  placeholder="Search student or teacher by name, class, or number…"
+                  value={loanForm.memberSearch || ''}
+                  onChange={(event) => {
+                    const memberSearch = event.target.value
+                    const member = members.find((item) => {
+                      const limit = item.memberType === 'Teacher' ? 300 : 1
+                      return item.status === 'Active'
+                        && `${item.name} · ${item.memberType}${item.classSection ? ` · ${item.classSection}` : ''} · ${item.membershipNumber} · ${item.activeLoans || 0}/${limit} copies${Number(item.activeLoans || 0) >= limit ? ' · limit reached' : ''}` === memberSearch
+                        && Number(item.activeLoans || 0) < limit
+                    })
+                    setLoanForm({ ...loanForm, memberId: member ? String(member.id) : '', memberSearch, quantity: '1' })
+                  }}
+                />
+                <datalist id="checkout-members">
+                  {members.filter((member) => {
                     const limit = member.memberType === 'Teacher' ? 300 : 1
-                    const atLimit = Number(member.activeLoans || 0) >= limit
-                    return <option key={member.id} value={member.id} disabled={atLimit}>{member.name} · {member.activeLoans || 0}/{limit} copies{atLimit ? ' · limit reached' : ''}</option>
+                    return member.status === 'Active' && Number(member.activeLoans || 0) < limit
+                  }).map((member) => {
+                    const limit = member.memberType === 'Teacher' ? 300 : 1
+                    return <option key={member.id} value={`${member.name} · ${member.memberType}${member.classSection ? ` · ${member.classSection}` : ''} · ${member.membershipNumber} · ${member.activeLoans || 0}/${limit} copies`} />
                   })}
-                </select>
+                </datalist>
               </Field>
               {selectedLoanMember?.memberType === 'Teacher' && (
                 <Field label="Number of copies">
@@ -1306,7 +1351,7 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
   )
 }
 
-function Loans({ loans, filter, setFilter, onIssue, onReturn, onMissed, busy }) {
+function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn, onMissed, busy }) {
   return (
     <>
       <PageHeading eyebrow="Every story has a return date" title="Loans & returns" description="Keep track of books finding their way back home.">
@@ -1314,8 +1359,11 @@ function Loans({ loans, filter, setFilter, onIssue, onReturn, onMissed, busy }) 
       </PageHeading>
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0eb] px-5 py-4">
-          <div className="flex gap-1 rounded-xl bg-[#f5f7f3] p-1">
-            {['All', 'Active', 'Overdue', 'Missed', 'Returned'].map((status) => <button key={status} onClick={() => setFilter(status)} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${filter === status ? 'bg-white text-[#415b48] shadow-sm' : 'text-[#8a958c] hover:text-[#46584b]'}`}>{status}</button>)}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex gap-1 rounded-xl bg-[#f5f7f3] p-1">
+              {['All', 'Active', 'Overdue', 'Missed', 'Returned'].map((status) => <button key={status} onClick={() => setFilter(status)} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${filter === status ? 'bg-white text-[#415b48] shadow-sm' : 'text-[#8a958c] hover:text-[#46584b]'}`}>{status}</button>)}
+            </div>
+            <SearchBox value={search} onChange={setSearch} placeholder="Search members or books…" />
           </div>
           <span className="text-[10px] text-[#929d94]">{loans.length} {loans.length === 1 ? 'record' : 'records'}</span>
         </div>
