@@ -24,6 +24,26 @@ export const config = {
     name: databaseName,
   },
   jwtSecret: process.env.JWT_SECRET,
+  otpDeliveryEmail: process.env.OTP_DELIVERY_EMAIL || '',
+  cronSecret: process.env.CRON_SECRET || '',
+  smtp: {
+    host: process.env.SMTP_HOST || '',
+    port: Number(process.env.SMTP_PORT) || 587,
+    user: process.env.SMTP_USER || '',
+    password: process.env.SMTP_PASSWORD || '',
+    fromEmail: process.env.SMTP_FROM_EMAIL || '',
+    fromName: process.env.SMTP_FROM_NAME || 'GS Busanza Library',
+  },
+}
+
+export function isSmtpConfigured() {
+  return Boolean(
+    config.smtp.host
+    && config.smtp.user
+    && config.smtp.password
+    && config.smtp.fromEmail
+    && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.smtp.fromEmail),
+  )
 }
 
 export function requireJwtSecret() {

@@ -3,12 +3,13 @@ import cors from 'cors'
 import helmet from 'helmet'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { randomBytes } from 'node:crypto'
-import { config, requireJwtSecret } from './config.js'
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
+import { config, isSmtpConfigured, requireJwtSecret } from './config.js'
 import { authenticate, allowRoles } from './auth.js'
 import { pool } from './db.js'
 import { csvDocument, parseCsv } from './csv.js'
 import { migrateSchoolDirectory } from './migrations.js'
+import { dispatchEmailOutbox, enqueueEmail, queueOverdueReminders, sendEmail } from './email.js'
 
 const app = express()
 const staff = [authenticate]
@@ -46,6 +47,14 @@ function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
 }
 
+async function dispatchQueuedEmailsAfterAction(action) {
+  try {
+    await dispatchEmailOutbox()
+  } catch (error) {
+    console.error(`Could not process queued member email after ${action}: ${error.message}`)
+  }
+}
+
 function audit(connection, actor, action, details) {
   return connection.execute(
     'INSERT INTO audit_logs (actor, action, details) VALUES (?, ?, ?)',
@@ -56,6 +65,32 @@ function audit(connection, actor, action, details) {
 function membershipNumberFor(memberType) {
   const prefix = memberType === 'Teacher' ? 'TCH' : 'STU'
   return `${prefix}-${Date.now().toString(36).toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`
+}
+
+function hashChallenge(challenge) {
+  return createHash('sha256').update(challenge).digest('hex')
+}
+
+function hashOtp(userId, challenge, code) {
+  return createHmac('sha256', config.jwtSecret)
+    .update(`${userId}:${challenge}:${code}`)
+    .digest('hex')
+}
+
+function maskEmail(email) {
+  const [local, domain] = email.split('@')
+  return `${local.slice(0, 2)}${'*'.repeat(Math.max(3, local.length - 2))}@${domain}`
+}
+
+function emailSubject(prefix, title) {
+  return `${prefix}: ${title}`.replace(/[\r\n]+/g, ' ').slice(0, 255)
+}
+
+function verifyCronAuthorization(authorization) {
+  if (!config.cronSecret) return false
+  const actual = Buffer.from(authorization || '')
+  const expected = Buffer.from(`Bearer ${config.cronSecret}`)
+  return actual.length === expected.length && timingSafeEqual(actual, expected)
 }
 
 function validateMember(data) {
@@ -209,19 +244,151 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
   }
 
   requireJwtSecret()
+  if (user.role === 'Librarian') {
+    if (!config.otpDeliveryEmail) {
+      return res.status(503).json({ error: 'Librarian email verification is not configured. Set OTP_DELIVERY_EMAIL and SMTP settings before enabling librarian sign-in.' })
+    }
+    if (!isSmtpConfigured()) {
+      return res.status(503).json({ error: 'Librarian email verification is unavailable because SMTP is not configured.' })
+    }
+
+    const challenge = randomBytes(32).toString('hex')
+    const code = String(randomInt(100_000, 1_000_000))
+    const connection = await pool.getConnection()
+    try {
+      await connection.beginTransaction()
+      await connection.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [user.id])
+      const [[previousCode]] = await connection.execute(
+        `SELECT send_count AS sendCount, DATE_FORMAT(send_date, '%Y-%m-%d') AS sendDate,
+           last_sent_at > DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 60 SECOND) AS coolingDown
+         FROM email_login_codes WHERE user_id = ? FOR UPDATE`,
+        [user.id],
+      )
+      if (Number(previousCode?.coolingDown)) {
+        await connection.rollback()
+        return res.status(429).json({ error: 'Please wait a minute before requesting another verification code.' })
+      }
+      const [[todayRow]] = await connection.query("SELECT DATE_FORMAT(CURRENT_DATE, '%Y-%m-%d') AS today")
+      const sendCount = previousCode?.sendDate === todayRow.today ? Number(previousCode.sendCount) : 0
+      if (sendCount >= 5) {
+        await connection.rollback()
+        return res.status(429).json({ error: 'The daily verification-code limit has been reached. Try again tomorrow.' })
+      }
+      await connection.execute(
+        `INSERT INTO email_login_codes
+          (user_id, code_hash, challenge_hash, expires_at, attempts, last_sent_at, send_date, send_count)
+         VALUES (?, ?, ?, DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 10 MINUTE), 0, CURRENT_TIMESTAMP, CURRENT_DATE, ?)
+         ON DUPLICATE KEY UPDATE code_hash = VALUES(code_hash), challenge_hash = VALUES(challenge_hash),
+           expires_at = VALUES(expires_at), attempts = 0, last_sent_at = VALUES(last_sent_at),
+           send_date = VALUES(send_date), send_count = VALUES(send_count)`,
+        [user.id, hashOtp(user.id, challenge, code), hashChallenge(challenge), sendCount + 1],
+      )
+      await connection.commit()
+    } catch (error) {
+      await connection.rollback()
+      throw error
+    } finally {
+      connection.release()
+    }
+
+    try {
+      await sendEmail({
+        to: config.otpDeliveryEmail,
+        name: user.name,
+        subject: 'Your GS Busanza Library sign-in code',
+        text: `Hello ${user.name},\n\nYour sign-in verification code is ${code}. It expires in 10 minutes. If you did not request it, you can ignore this email.`,
+      })
+    } catch (error) {
+      await pool.execute('DELETE FROM email_login_codes WHERE user_id = ? AND challenge_hash = ?', [user.id, hashChallenge(challenge)])
+      console.error(`Could not send the librarian sign-in code: ${error.message}`)
+      return res.status(502).json({ error: 'Could not send the verification code. Check the SMTP settings and try again.' })
+    }
+    return res.json({ requiresOtp: true, challenge, email: maskEmail(config.otpDeliveryEmail) })
+  }
+
   const publicUser = { id: user.id, name: user.name, email: user.email, role: user.role }
   const token = jwt.sign(publicUser, config.jwtSecret, { expiresIn: '8h' })
   res.json({ token, user: publicUser })
 }))
 
+app.post('/api/auth/verify-otp', asyncRoute(async (req, res) => {
+  const challenge = String(req.body?.challenge || '')
+  const code = String(req.body?.code || '')
+  if (!/^[a-f0-9]{64}$/.test(challenge) || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ error: 'Enter the six-digit verification code from your email.' })
+  }
+  requireJwtSecret()
+
+  const connection = await pool.getConnection()
+  let verifiedUser
+  try {
+    await connection.beginTransaction()
+    const [[record]] = await connection.execute(
+      `SELECT c.user_id AS userId, c.code_hash AS codeHash, c.attempts,
+         c.expires_at <= CURRENT_TIMESTAMP AS expired,
+         u.name, u.email, u.role
+       FROM email_login_codes c JOIN users u ON u.id = c.user_id
+       WHERE c.challenge_hash = ? FOR UPDATE`,
+      [hashChallenge(challenge)],
+    )
+    if (!record) {
+      await connection.rollback()
+      return res.status(401).json({ error: 'This verification request is invalid or has expired. Sign in again.' })
+    }
+    if (Number(record.expired)) {
+      await connection.execute('DELETE FROM email_login_codes WHERE user_id = ?', [record.userId])
+      await connection.commit()
+      return res.status(401).json({ error: 'The verification code has expired. Sign in again to request a new one.' })
+    }
+    if (Number(record.attempts) >= 5) {
+      await connection.execute('DELETE FROM email_login_codes WHERE user_id = ?', [record.userId])
+      await connection.commit()
+      return res.status(429).json({ error: 'Too many incorrect verification codes. Sign in again to request a new one.' })
+    }
+    const expected = Buffer.from(record.codeHash, 'hex')
+    const actual = Buffer.from(hashOtp(record.userId, challenge, code), 'hex')
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+      if (Number(record.attempts) >= 4) {
+        await connection.execute('DELETE FROM email_login_codes WHERE user_id = ?', [record.userId])
+      } else {
+        await connection.execute('UPDATE email_login_codes SET attempts = attempts + 1 WHERE user_id = ?', [record.userId])
+      }
+      await connection.commit()
+      return res.status(401).json({ error: 'That verification code is incorrect.' })
+    }
+    await connection.execute('DELETE FROM email_login_codes WHERE user_id = ?', [record.userId])
+    await connection.commit()
+    verifiedUser = { id: record.userId, name: record.name, email: record.email, role: record.role }
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+
+  const token = jwt.sign(verifiedUser, config.jwtSecret, { expiresIn: '8h' })
+  res.json({ token, user: verifiedUser })
+}))
+
 app.get('/api/auth/me', ...staff, (_req, res) => res.json({ user: _req.user }))
+
+app.get('/api/cron/overdue', asyncRoute(async (req, res) => {
+  if (!config.cronSecret) return res.status(503).json({ error: 'Overdue reminder scheduling is not configured.' })
+  if (!verifyCronAuthorization(req.get('authorization'))) {
+    return res.status(401).json({ error: 'Invalid cron authorization.' })
+  }
+  if (!isSmtpConfigured()) return res.status(503).json({ error: 'Overdue email reminders are not available because SMTP is not configured.' })
+  const result = await queueOverdueReminders()
+  await dispatchEmailOutbox()
+  res.json(result)
+}))
 
 app.post('/api/admin/migrations/school-directory', ...canManage, asyncRoute(async (req, res) => {
   const connection = await pool.getConnection()
   try {
     await migrateSchoolDirectory(connection)
-    await audit(connection, req.user.name, 'School directory migration applied', 'Updated member fields for student and teacher records')
-    res.json({ message: 'The GS Busanza school directory database migration is complete.' })
+    await audit(connection, req.user.name, 'School directory migration applied', 'Updated student and teacher records and created email verification and notification tables')
+    res.json({ message: 'The school directory and email notification database migrations are complete.' })
   } finally {
     connection.release()
   }
@@ -948,6 +1115,7 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
   }
 
   const connection = await pool.getConnection()
+  let connectionReleased = false
   try {
     await connection.beginTransaction()
     const [[book]] = await connection.execute(
@@ -963,7 +1131,7 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
       return res.status(409).json({ error: `Only ${book.available_copies} ${Number(book.available_copies) === 1 ? 'copy is' : 'copies are'} available.` })
     }
     const [[member]] = await connection.execute(
-      'SELECT id, name, member_type AS memberType FROM members WHERE id = ? AND status = ? FOR UPDATE',
+      'SELECT id, name, email, member_type AS memberType FROM members WHERE id = ? AND status = ? FOR UPDATE',
       [memberId, 'Active'],
     )
     if (!member) {
@@ -1005,18 +1173,32 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
       'INSERT INTO loans (book_id, member_id, due_date, quantity, copy_code) VALUES (?, ?, ?, ?, ?)',
       [bookId, memberId, dueDate, quantity, copyCode || null],
     )
+    const emailNotification = member.email ? 'queued' : 'no_email'
+    if (member.email) {
+      await enqueueEmail(connection, {
+        eventKey: `checkout:${result.insertId}`,
+        eventType: 'checkout',
+        to: member.email,
+        name: member.name,
+        subject: emailSubject('Library checkout', book.title),
+        text: `Hello ${member.name},\n\nYou checked out ${quantity} ${quantity === 1 ? 'copy' : 'copies'} of "${book.title}". The due date is ${dueDate}. Please return the book(s) by the due date.`,
+      })
+    }
     await connection.execute(
       'UPDATE books SET available_copies = available_copies - ? WHERE id = ?',
       [quantity, bookId],
     )
     await audit(connection, req.user.name, 'Book checked out', `"${book.title}" checked out to ${member.name}`)
     await connection.commit()
-    res.status(201).json({ id: result.insertId, bookId, memberId, bookTitle: book.title, memberName: member.name, dueDate, quantity, returnedQuantity: 0, missedQuantity: 0, outstandingQuantity: quantity, copyCode: copyCode || null, status: 'Active' })
+    connection.release()
+    connectionReleased = true
+    await dispatchQueuedEmailsAfterAction('checkout')
+    res.status(201).json({ id: result.insertId, bookId, memberId, bookTitle: book.title, memberName: member.name, dueDate, quantity, returnedQuantity: 0, missedQuantity: 0, outstandingQuantity: quantity, copyCode: copyCode || null, status: 'Active', emailNotification })
   } catch (error) {
-    await connection.rollback()
+    if (!connectionReleased) await connection.rollback()
     throw error
   } finally {
-    connection.release()
+    if (!connectionReleased) connection.release()
   }
 }))
 
@@ -1239,13 +1421,14 @@ app.post('/api/loans/:id/missed', ...canManage, asyncRoute(async (req, res) => {
     return res.status(400).json({ error: 'Enter a missed quantity from 1 to 300.' })
   }
   const connection = await pool.getConnection()
+  let connectionReleased = false
   try {
     await connection.beginTransaction()
     const [[loan]] = await connection.execute(
       `SELECT l.id, l.book_id AS bookId, l.member_id AS memberId,
        l.quantity, l.returned_quantity AS returnedQuantity,
        l.missed_quantity AS missedQuantity, l.missed_at AS missedAt,
-       b.title, m.name AS memberName
+       b.title, m.name AS memberName, m.email AS memberEmail
        FROM loans l JOIN books b ON b.id = l.book_id
        JOIN members m ON m.id = l.member_id
        WHERE l.id = ? FOR UPDATE`,
@@ -1280,14 +1463,28 @@ app.post('/api/loans/:id/missed', ...canManage, asyncRoute(async (req, res) => {
       [missedQuantity, loan.id],
     )
     await connection.execute('UPDATE books SET total_copies = total_copies - ? WHERE id = ?', [quantity, loan.bookId])
+    const emailNotification = loan.memberEmail ? 'queued' : 'no_email'
+    if (loan.memberEmail) {
+      await enqueueEmail(connection, {
+        eventKey: `missed:${loan.id}:${missedQuantity}`,
+        eventType: 'missed',
+        to: loan.memberEmail,
+        name: loan.memberName,
+        subject: emailSubject('Library book marked missed', loan.title),
+        text: `Hello ${loan.memberName},\n\n${quantity} ${quantity === 1 ? 'copy' : 'copies'} of "${loan.title}" from your library checkout have been marked as missed. ${outstanding - quantity > 0 ? `${outstanding - quantity} ${outstanding - quantity === 1 ? 'copy remains' : 'copies remain'} outstanding.` : 'No copies remain outstanding on this checkout.'} Please contact the librarian if you believe this is incorrect.`,
+      })
+    }
     await audit(connection, req.user.name, 'Book marked missed', `${quantity} ${loan.title} ${quantity === 1 ? 'copy' : 'copies'} marked missed by ${loan.memberName}; removed from inventory`)
     await connection.commit()
-    res.json({ message: `${quantity} ${quantity === 1 ? 'copy' : 'copies'} marked missed and removed from the catalog.`, missedQuantity, outstandingQuantity: outstanding - quantity })
+    connection.release()
+    connectionReleased = true
+    await dispatchQueuedEmailsAfterAction('marking a book missed')
+    res.json({ message: `${quantity} ${quantity === 1 ? 'copy' : 'copies'} marked missed and removed from the catalog.`, missedQuantity, outstandingQuantity: outstanding - quantity, emailNotification })
   } catch (error) {
-    await connection.rollback()
+    if (!connectionReleased) await connection.rollback()
     throw error
   } finally {
-    connection.release()
+    if (!connectionReleased) connection.release()
   }
 }))
 
@@ -1353,8 +1550,8 @@ app.use((error, _req, res, _next) => {
     return res.status(503).json({ error: 'Authentication is not configured. Set JWT_SECRET in your deployment environment.' })
   }
   if (error.code === 'ER_NO_SUCH_TABLE' || error.code === 'ER_BAD_DB_ERROR') {
-    console.error('Database schema is missing. Configure MySQL and run "npm run db:setup".')
-    return res.status(503).json({ error: 'Database schema is missing. Check your MySQL configuration and run npm run db:setup.' })
+    console.error('Database schema is missing. Configure MySQL and run "npm run db:setup" for a new database or "npm run db:migrate:directory" for an existing database.')
+    return res.status(503).json({ error: 'Database schema is missing. Run npm run db:setup for a new database or npm run db:migrate:directory for an existing database.' })
   }
   if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND' || error.code === 'ER_ACCESS_DENIED_ERROR') {
     console.error('Could not connect to MySQL. Check DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, and DB_SSL.')

@@ -102,6 +102,27 @@ const userFromSession = () => {
   }
 }
 
+async function verifyLoginOtp(event) {
+  event.preventDefault()
+  setBusy(true)
+  try {
+    const result = await api('/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ challenge: loginChallenge, code: loginOtpCode }),
+    })
+    sessionStorage.setItem('libraryflow-token', result.token)
+    sessionStorage.setItem('libraryflow-user', JSON.stringify(result.user))
+    setLoginChallenge(null)
+    setLoginOtpCode('')
+    setUser(result.user)
+    notify(`Welcome back, ${result.user.name.split(' ')[0]}.`)
+  } catch (error) {
+    notify(error.message)
+  } finally {
+    setBusy(false)
+  }
+}
+
 function initials(name = '') {
   return name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
 }
@@ -134,6 +155,9 @@ function App() {
   const [loanForm, setLoanForm] = useState({ bookId: '', bookSearch: '', memberId: '', memberSearch: '', quantity: '1', dueDate: '', copyCode: '' })
   const [loanActionQuantity, setLoanActionQuantity] = useState('1')
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
+  const [loginChallenge, setLoginChallenge] = useState(null)
+  const [loginOtpEmail, setLoginOtpEmail] = useState('')
+  const [loginOtpCode, setLoginOtpCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [darkMode, setDarkMode] = useState(() => {
     try {
@@ -245,6 +269,14 @@ function App() {
         method: 'POST',
         body: JSON.stringify(loginForm),
       })
+      if (result.requiresOtp) {
+        setLoginChallenge(result.challenge)
+        setLoginOtpEmail(result.email)
+        setLoginOtpCode('')
+        setLoginForm((current) => ({ ...current, password: '' }))
+        notify(`A verification code was sent to ${result.email}.`)
+        return
+      }
       sessionStorage.setItem('libraryflow-token', result.token)
       sessionStorage.setItem('libraryflow-user', JSON.stringify(result.user))
       setUser(result.user)
@@ -257,6 +289,7 @@ function App() {
   }
 
   function logout() {
+    if (!window.confirm('Are you sure you want to sign out?')) return
     sessionStorage.removeItem('libraryflow-token')
     sessionStorage.removeItem('libraryflow-user')
     setUser(null)
@@ -322,13 +355,13 @@ function App() {
     }
     setBusy(true)
     try {
-      await api('/loans', {
+      const result = await api('/loans', {
         method: 'POST',
         body: JSON.stringify({ ...loanForm, bookId: Number(loanForm.bookId), memberId: Number(loanForm.memberId), quantity: Number(loanForm.quantity) }),
       })
       setModal(null)
       setLoanForm({ bookId: '', bookSearch: '', memberId: '', memberSearch: '', quantity: '1', dueDate: '', copyCode: '' })
-      notify(`${loanForm.quantity} ${Number(loanForm.quantity) === 1 ? 'copy' : 'copies'} checked out successfully.`)
+      notify(`${loanForm.quantity} ${Number(loanForm.quantity) === 1 ? 'copy' : 'copies'} checked out successfully.${result.emailNotification === 'queued' ? ' A notice was queued for the member.' : ' No member email is on file.'}`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -352,11 +385,11 @@ function App() {
     }
     setBusy(true)
     try {
-      await api(`/loans/${loan.id}/${action}`, { method: 'POST', body: JSON.stringify({ quantity }) })
+      const result = await api(`/loans/${loan.id}/${action}`, { method: 'POST', body: JSON.stringify({ quantity }) })
       setModal(null)
       notify(action === 'return'
         ? `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of “${loan.bookTitle}” returned.`
-        : `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of “${loan.bookTitle}” marked missed.`)
+        : `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of “${loan.bookTitle}” marked missed.${result.emailNotification === 'queued' ? ' A notice was queued for the member.' : ' No member email is on file.'}`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -585,7 +618,13 @@ function App() {
       <Login
         form={loginForm}
         setForm={setLoginForm}
+        challenge={loginChallenge}
+        otpEmail={loginOtpEmail}
+        otpCode={loginOtpCode}
+        setOtpCode={setLoginOtpCode}
         onSubmit={handleLogin}
+        onVerifyOtp={verifyLoginOtp}
+        onBackToLogin={() => { setLoginChallenge(null); setLoginOtpCode('') }}
         busy={busy}
         toast={toast}
       />
@@ -830,7 +869,7 @@ function App() {
                   value={loanForm.bookSearch || ''}
                   onChange={(event) => {
                     const bookSearch = event.target.value
-                    const book = availableBooks.find((item) => `${item.title} · ${item.isbn || 'No ISBN'} · ${item.author || 'No author'} · ${item.shelf || 'No shelf'} · ${item.availableCopies} available` === bookSearch)
+                    const book = availableBooks.find((item) => `${item.title} · Grade ${item.grade || 'not recorded'} · ${item.isbn || 'No ISBN'} · ${item.author || 'No author'} · ${item.shelf || 'No shelf'} · ${item.availableCopies} available` === bookSearch)
                     setLoanForm({
                       ...loanForm,
                       bookId: book ? String(book.id) : '',
@@ -840,7 +879,7 @@ function App() {
                   }}
                 />
                 <datalist id="checkout-books">
-                  {availableBooks.map((book) => <option key={book.id} value={`${book.title} · ${book.isbn || 'No ISBN'} · ${book.author || 'No author'} · ${book.shelf || 'No shelf'} · ${book.availableCopies} available`} />)}
+                  {availableBooks.map((book) => <option key={book.id} value={`${book.title} · Grade ${book.grade || 'not recorded'} · ${book.isbn || 'No ISBN'} · ${book.author || 'No author'} · ${book.shelf || 'No shelf'} · ${book.availableCopies} available`} />)}
                 </datalist>
               </Field>
               {selectedLoanBook && (
@@ -946,7 +985,7 @@ function UserCard({ user, onLogout }) {
   )
 }
 
-function Login({ form, setForm, onSubmit, busy, toast }) {
+function Login({ form, setForm, challenge, otpEmail, otpCode, setOtpCode, onSubmit, onVerifyOtp, onBackToLogin, busy, toast }) {
   return (
     <main className="grid min-h-screen bg-white lg:grid-cols-[1fr_1fr]">
       <section className="relative hidden overflow-hidden bg-[#284737] p-12 text-white lg:flex lg:flex-col lg:justify-between xl:p-16">
@@ -968,14 +1007,22 @@ function Login({ form, setForm, onSubmit, busy, toast }) {
       <section className="flex min-h-screen items-center justify-center px-6 py-12 sm:px-10">
         <div className="w-full max-w-[380px]">
           <div className="mb-11 lg:hidden"><Brand /></div>
-          <p className="text-[11px] font-bold uppercase tracking-[.17em] text-[#79917e]">Welcome back</p>
-          <h2 className="mt-3 text-[32px] font-bold tracking-[-.055em]">Sign in to your library</h2>
-          <p className="mt-2 text-[13px] leading-6 text-[#8b958e]">A good day to discover something new.</p>
-          <form onSubmit={onSubmit} className="mt-8 space-y-5">
-            <Field label="Username"><input required autoComplete="username" type="text" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
-            <Field label="Password"><input required autoComplete="current-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
-            <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3.5 text-[13px] font-bold text-white transition hover:bg-[#284a39] disabled:cursor-wait disabled:opacity-70">{busy ? 'Signing you in…' : 'Sign in'} <ArrowRight size={15} /></button>
-          </form>
+          <p className="text-[11px] font-bold uppercase tracking-[.17em] text-[#79917e]">{challenge ? 'Extra sign-in check' : 'Welcome back'}</p>
+          <h2 className="mt-3 text-[32px] font-bold tracking-[-.055em]">{challenge ? 'Verify it’s you' : 'Sign in to your library'}</h2>
+          <p className="mt-2 text-[13px] leading-6 text-[#8b958e]">{challenge ? `Enter the six-digit code sent to ${otpEmail}. The code expires in 10 minutes.` : 'A good day to discover something new.'}</p>
+          {challenge ? (
+            <form onSubmit={onVerifyOtp} className="mt-8 space-y-5">
+              <Field label="Email verification code"><input required autoFocus autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otpCode} onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))} /></Field>
+              <button disabled={busy || otpCode.length !== 6} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3.5 text-[13px] font-bold text-white transition hover:bg-[#284a39] disabled:cursor-wait disabled:opacity-70">{busy ? 'Verifying…' : 'Verify and sign in'} <ArrowRight size={15} /></button>
+              <button type="button" onClick={onBackToLogin} disabled={busy} className="w-full rounded-xl border border-[#e5eae3] px-4 py-3 text-[12px] font-semibold text-[#536258] hover:bg-[#f7f8f5] disabled:opacity-60">Back to sign in</button>
+            </form>
+          ) : (
+            <form onSubmit={onSubmit} className="mt-8 space-y-5">
+              <Field label="Username"><input required autoComplete="username" type="text" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
+              <Field label="Password"><input required autoComplete="current-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
+              <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3.5 text-[13px] font-bold text-white transition hover:bg-[#284a39] disabled:cursor-wait disabled:opacity-70">{busy ? 'Signing you in…' : 'Sign in'} <ArrowRight size={15} /></button>
+            </form>
+          )}
           <div className="mt-8 rounded-xl border border-[#e9ede7] bg-[#fafbf9] p-4"><SchoolContact /></div>
           <p className="mt-8 text-center text-[10px] text-[#a1aaa2]">Your library, always in good hands.</p>
         </div>

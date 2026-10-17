@@ -65,6 +65,14 @@ In **Vercel → Project → Settings → Environment Variables**, configure thes
 | `DB_NAME` | Database name, e.g. `library_management` |
 | `DB_SSL` | `true` when required by the database provider (`true` for TiDB Cloud Starter) |
 | `JWT_SECRET` | Unique random value of at least 32 characters |
+| `SMTP_HOST` | SMTP relay hostname (`smtp-relay.brevo.com` for Brevo) |
+| `SMTP_PORT` | `587` for STARTTLS, or `465` for TLS |
+| `SMTP_USER` | SMTP login from the provider's SMTP settings |
+| `SMTP_PASSWORD` | Private SMTP key/password from the provider |
+| `SMTP_FROM_EMAIL` | Verified sender address at the provider |
+| `SMTP_FROM_NAME` | Optional sender name, such as `GS Busanza Library` |
+| `OTP_DELIVERY_EMAIL` | Staff mailbox for librarian login codes |
+| `CRON_SECRET` | Unique random secret used to authorize daily overdue reminders |
 
 If your provider requires a custom certificate, also set `DB_SSL_CA` to its CA certificate. Vercel automatically supplies the deployed URL for CORS. Optionally set `CLIENT_URL` to an additional allowed frontend origin.
 
@@ -72,7 +80,7 @@ After saving or changing environment variables, **redeploy** so the backend serv
 
 ## Staff sign-in
 
-Use the librarian username and password set for your school deployment. Login accepts a username; it does not need to be an email address.
+Use the librarian username and password set for your school deployment. Login accepts a username; it does not need to be an email address. Librarian sign-ins also require a six-digit, single-use email code sent to `OTP_DELIVERY_EMAIL`; codes expire after ten minutes, allow five attempts, and are limited to five sends per day. Administrator sign-ins continue to use the password only.
 Signed-in staff can rotate their own credentials with `POST /api/auth/change-credentials` using `currentPassword`, `username`, and `password`. The request requires a new password between 12 and 72 UTF-8 bytes and stores only its bcrypt hash.
 
 For an existing database, change the librarian login from a trusted machine using environment variables (do not put the password in source control):
@@ -100,7 +108,7 @@ This changes the single librarian account's username and bcrypt password without
 - Daily library attendance for students and teachers, optional reading-book records, frequent-visitor rankings, and date-based CSV export
 - Borrower counts and filtered circulation/class reports
 - Audit history for library actions
-- JWT sign-in, hashed staff passwords, and Administrator/Librarian permissions
+- JWT sign-in, hashed staff passwords, email OTP for Librarians, and Administrator/Librarian permissions
 
 ### Student and teacher CSV files
 
@@ -110,7 +118,7 @@ Download either CSV template from **Students & teachers**. Both templates use th
 name,member_type,class_section,membership_number,email,phone
 ```
 
-For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email, phone, and membership number may be blank; missing numbers are generated. Duplicate membership numbers, email addresses, and matching names in the same member type and class are skipped and reported, both within the CSV and against existing members. Phone values are stored for directory use only; automated notifications remain off. Imports accept up to 5,000 rows per file.
+For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email, phone, and membership number may be blank; missing numbers are generated. Duplicate membership numbers, email addresses, and matching names in the same member type and class are skipped and reported, both within the CSV and against existing members. Phone values are stored for directory use; member emails are used for loan notifications when SMTP is configured. Imports accept up to 5,000 rows per file.
 
 ### Separate reports
 
@@ -138,9 +146,15 @@ If checked-out copies are lost, use **Loans & returns → Mark missed** and ente
 
 When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and the same code cannot be used on another checkout while its loan still has outstanding copies.
 
-### Automatic email and WhatsApp notifications
+### Email notifications
 
-Automatic notifications are disabled. Email sending needs a configured mail provider; WhatsApp via Twilio is not free for production and requires an approved/verified WhatsApp sender, recipient consent, and billable Twilio/Meta message fees. No Twilio account or sender was created or connected. Unofficial WhatsApp Web/QR wrappers are not used; they can expose linked-session credentials, violate WhatsApp terms, and cause the linked number to be restricted or banned.
+The app can send librarian sign-in codes and member emails for checkouts, missed books, and overdue loans. Checkout and missed-book emails are queued with the circulation transaction; overdue reminders are sent at most once per loan per day. Messages go only to the email address recorded on the member. Outbound messages use a database-backed outbox and retry temporary delivery failures.
+
+For Brevo, create an account yourself, verify a sender address, and copy the SMTP login and SMTP key from **SMTP & API → SMTP** into local `.env` or deployment secrets. Use the SMTP relay hostname and port shown above; never put credentials in source control or send them in chat. Brevo's official [SMTP relay documentation](https://developers.brevo.com/docs/smtp-integration) describes its relay. Provider free-plan eligibility, daily limits, verification requirements, and deliverability can change; check the current plan before relying on it. The app itself adds no paid mail service.
+
+For an existing database, run `npm.cmd run db:migrate:directory` before deploying; this also creates the OTP and email-outbox tables. Vercel runs the protected `/api/cron/overdue` endpoint daily at 08:00 UTC using `CRON_SECRET`. For a local always-on API, the email worker checks overdue loans and pending messages every 15 minutes. When a member has no email address, the app displays that no email notice could be queued.
+
+WhatsApp notifications remain disabled. WhatsApp via Twilio is not free for production and requires an approved/verified WhatsApp sender, recipient consent, and billable Twilio/Meta message fees. Unofficial WhatsApp Web/QR wrappers are not used; they can expose linked-session credentials, violate WhatsApp terms, and cause the linked number to be restricted or banned.
 
 ### Apply the school-directory database migration
 
@@ -150,7 +164,7 @@ Before deploying school-directory or book catalog changes to an existing databas
 npm.cmd run db:migrate:directory
 ```
 
-It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code and missed-book/quantity tracking to loan records, creates the library attendance table, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
+It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code and missed-book/quantity tracking to loan records, creates the library attendance and email OTP/outbox tables, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
 For a deployed Vercel database, an authenticated Librarian or Administrator can apply the same idempotent migration with `POST /api/admin/migrations/school-directory` and a Bearer token.
 
 ## Other commands

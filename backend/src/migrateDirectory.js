@@ -8,7 +8,7 @@ try {
   } finally {
     connection.release()
   }
-  console.log('School directory schema and librarian name are up to date.')
+  console.log('School directory and email notification schemas are up to date.')
 } catch (error) {
   console.error('School directory migration failed:', error.message)
   process.exitCode = 1
