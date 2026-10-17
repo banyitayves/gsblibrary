@@ -71,8 +71,8 @@ In **Vercel → Project → Settings → Environment Variables**, configure thes
 | `SMTP_PASSWORD` | Google App Password or private SMTP key/password (not your Gmail password) |
 | `SMTP_FROM_EMAIL` | The authenticated Gmail address or verified provider sender |
 | `SMTP_FROM_NAME` | Optional sender name, such as `GS Busanza Library` |
-| `OTP_DELIVERY_EMAIL` | Staff mailbox for librarian login codes |
-| `CRON_SECRET` | Unique random secret used to authorize daily overdue reminders |
+| `PASSWORD_RESET_EMAIL` | Mailbox that receives librarian password-reset links |
+| `PUBLIC_APP_URL` | Public frontend URL used to build reset links (Vercel production URL is detected automatically) |
 
 If your provider requires a custom certificate, also set `DB_SSL_CA` to its CA certificate. Vercel automatically supplies the deployed URL for CORS. Optionally set `CLIENT_URL` to an additional allowed frontend origin.
 
@@ -80,8 +80,9 @@ After saving or changing environment variables, **redeploy** so the backend serv
 
 ## Staff sign-in
 
-Use the librarian username and password set for your school deployment. Login accepts a username; it does not need to be an email address. Librarian sign-ins also require a six-digit, single-use email code sent to `OTP_DELIVERY_EMAIL`; codes expire after ten minutes, allow five attempts, and are limited to five sends per day. Administrator sign-ins continue to use the password only.
+Use the librarian username and password set for your school deployment. Login accepts a username; it does not need to be an email address. Staff sign in with their username and password. The password field has a show/hide control. Use **Forgot password?** to email a one-time password-reset link to `PASSWORD_RESET_EMAIL`; reset links expire after 30 minutes and are limited to five sends per day.
 Signed-in staff can rotate their own credentials with `POST /api/auth/change-credentials` using `currentPassword`, `username`, and `password`. The request requires a new password between 12 and 72 UTF-8 bytes and stores only its bcrypt hash.
+The librarian reset flow requires SMTP and `PASSWORD_RESET_EMAIL`. For existing deployments that still have `OTP_DELIVERY_EMAIL`, it is temporarily accepted as a fallback; replace it with `PASSWORD_RESET_EMAIL`.
 
 For an existing database, change the librarian login from a trusted machine using environment variables (do not put the password in source control):
 
@@ -108,7 +109,7 @@ This changes the single librarian account's username and bcrypt password without
 - Daily library attendance for students and teachers, optional reading-book records, frequent-visitor rankings, and date-based CSV export
 - Borrower counts and filtered circulation/class reports
 - Audit history for library actions
-- JWT sign-in, hashed staff passwords, email OTP for Librarians, and Administrator/Librarian permissions
+- JWT sign-in, hashed staff passwords, email-based librarian password recovery, and Administrator/Librarian permissions
 
 ### Student and teacher CSV files
 
@@ -118,7 +119,7 @@ Download either CSV template from **Students & teachers**. Both templates use th
 name,member_type,class_section,membership_number,email,phone
 ```
 
-For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email, phone, and membership number may be blank; missing numbers are generated. Duplicate membership numbers, email addresses, and matching names in the same member type and class are skipped and reported, both within the CSV and against existing members. Phone values are stored for directory use; member emails are used for loan notifications when SMTP is configured. Imports accept up to 5,000 rows per file.
+For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email, phone, and membership number may be blank; missing numbers are generated. Duplicate membership numbers, email addresses, and matching names in the same member type and class are skipped and reported, both within the CSV and against existing members. Phone and email values are stored for directory use. Imports accept up to 5,000 rows per file.
 
 ### Separate reports
 
@@ -146,15 +147,15 @@ If checked-out copies are lost, use **Loans & returns → Mark missed** and ente
 
 When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and the same code cannot be used on another checkout while its loan still has outstanding copies.
 
-### Email notifications
+### Password-reset email
 
-The app can send librarian sign-in codes and member emails for checkouts, missed books, and overdue loans. Checkout and missed-book emails are queued with the circulation transaction; overdue reminders are sent at most once per loan per day. Messages go only to the email address recorded on the member. Outbound messages use a database-backed outbox and retry temporary delivery failures.
+The app sends email only for librarian password resets. Sign-in does not require email verification, and the app does not send checkout, missed-book, or overdue notifications to members.
 
-For the selected Gmail setup, configure `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER` and `SMTP_FROM_EMAIL` as `nshimiyeyves12@gmail.com`, and `OTP_DELIVERY_EMAIL` as the mailbox that should receive librarian codes. Set `SMTP_PASSWORD` to a dedicated Google App Password, **not** your Google account password. Google requires 2-Step Verification to create an App Password and recommends OAuth when the client supports it; see [Google's App Password instructions](https://support.google.com/accounts/answer/185833) and create it at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Some managed or school Google accounts may disable App Passwords. App Passwords are sensitive credentials; enter them only in local ignored `.env` or deployment secrets, never in source control or chat. Gmail limits automated sending and may block/restrict unusual activity, so verify current limits and monitor delivery.
+Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM_EMAIL` for an authenticated sender, and set `PASSWORD_RESET_EMAIL` to the librarian's recovery mailbox. For Gmail, use a dedicated Google App Password, **not** your Google account password. Google requires 2-Step Verification to create an App Password and recommends OAuth when the client supports it; see [Google's App Password instructions](https://support.google.com/accounts/answer/185833) and create it at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Some managed or school Google accounts may disable App Passwords. App Passwords are sensitive credentials; enter them only in local ignored `.env` or deployment secrets, never in source control or chat. Gmail limits automated sending and may block/restrict unusual activity, so verify current limits and monitor delivery.
 
 If you later use Brevo, create and verify a sender on a domain you control, configure that domain's authentication records, then copy the SMTP login and SMTP key from **SMTP & API → SMTP** into deployment secrets. See Brevo's official [SMTP relay documentation](https://developers.brevo.com/docs/smtp-integration). Do not impersonate a `@gmail.com` sender through Brevo; sender authentication and delivery are controlled by Google.
 
-For an existing database, run `npm.cmd run db:migrate:directory` before deploying; this also creates the OTP and email-outbox tables. Vercel runs the protected `/api/cron/overdue` endpoint daily at 08:00 UTC using `CRON_SECRET`. For a local always-on API, the email worker checks overdue loans and pending messages every 15 minutes. When a member has no email address, the app displays that no email notice could be queued.
+For an existing database, run `npm.cmd run db:migrate:directory` before deploying; this creates the one-time password-reset token table. The reset endpoint also ensures this table exists when first used. Vercel's daily overdue-email cron and the local email worker have been removed.
 
 WhatsApp notifications remain disabled. WhatsApp via Twilio is not free for production and requires an approved/verified WhatsApp sender, recipient consent, and billable Twilio/Meta message fees. Unofficial WhatsApp Web/QR wrappers are not used; they can expose linked-session credentials, violate WhatsApp terms, and cause the linked number to be restricted or banned.
 
@@ -166,7 +167,7 @@ Before deploying school-directory or book catalog changes to an existing databas
 npm.cmd run db:migrate:directory
 ```
 
-It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code and missed-book/quantity tracking to loan records, creates the library attendance and email OTP/outbox tables, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
+It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code and missed-book/quantity tracking to loan records, creates the library attendance and password-reset token tables, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
 For a deployed Vercel database, an authenticated Librarian or Administrator can apply the same idempotent migration with `POST /api/admin/migrations/school-directory` and a Bearer token.
 
 ## Other commands

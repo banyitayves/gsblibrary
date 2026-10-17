@@ -1,14 +1,12 @@
 import app from './app.js'
 import { config, requireJwtSecret } from './config.js'
 import { pool } from './db.js'
-import { startEmailWorker } from './email.js'
 
 async function start() {
   requireJwtSecret()
   await pool.query('SELECT 1')
   app.listen(config.port, () => {
     console.log(`Library API listening at http://localhost:${config.port}`)
-    startEmailWorker()
   })
 }
 

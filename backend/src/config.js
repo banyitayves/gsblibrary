@@ -24,8 +24,9 @@ export const config = {
     name: databaseName,
   },
   jwtSecret: process.env.JWT_SECRET,
-  otpDeliveryEmail: process.env.OTP_DELIVERY_EMAIL || '',
-  cronSecret: process.env.CRON_SECRET || '',
+  passwordResetEmail: process.env.PASSWORD_RESET_EMAIL || process.env.OTP_DELIVERY_EMAIL || '',
+  publicAppUrl: process.env.PUBLIC_APP_URL
+    || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : clientUrls[0] || ''),
   smtp: {
     host: process.env.SMTP_HOST || '',
     port: Number(process.env.SMTP_PORT) || 587,

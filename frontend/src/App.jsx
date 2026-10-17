@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
-  Bell,
   BookOpen,
   Bookmark,
   CalendarDays,
@@ -12,6 +11,8 @@ import {
   Clock3,
   ClipboardCheck,
   Download,
+  Eye,
+  EyeOff,
   FileBarChart,
   LayoutDashboard,
   LibraryBig,
@@ -24,7 +25,6 @@ import {
   UsersRound,
   X,
   Sun,
-  TrendingUp,
 } from 'lucide-react'
 import { api } from './api.js'
 
@@ -102,27 +102,6 @@ const userFromSession = () => {
   }
 }
 
-async function verifyLoginOtp(event) {
-  event.preventDefault()
-  setBusy(true)
-  try {
-    const result = await api('/auth/verify-otp', {
-      method: 'POST',
-      body: JSON.stringify({ challenge: loginChallenge, code: loginOtpCode }),
-    })
-    sessionStorage.setItem('libraryflow-token', result.token)
-    sessionStorage.setItem('libraryflow-user', JSON.stringify(result.user))
-    setLoginChallenge(null)
-    setLoginOtpCode('')
-    setUser(result.user)
-    notify(`Welcome back, ${result.user.name.split(' ')[0]}.`)
-  } catch (error) {
-    notify(error.message)
-  } finally {
-    setBusy(false)
-  }
-}
-
 function initials(name = '') {
   return name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
 }
@@ -155,9 +134,9 @@ function App() {
   const [loanForm, setLoanForm] = useState({ bookId: '', bookSearch: '', memberId: '', memberSearch: '', quantity: '1', dueDate: '', copyCode: '' })
   const [loanActionQuantity, setLoanActionQuantity] = useState('1')
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
-  const [loginChallenge, setLoginChallenge] = useState(null)
-  const [loginOtpEmail, setLoginOtpEmail] = useState('')
-  const [loginOtpCode, setLoginOtpCode] = useState('')
+  const [loginMode, setLoginMode] = useState(() => new URLSearchParams(window.location.search).has('resetToken') ? 'reset' : 'signin')
+  const [passwordResetToken, setPasswordResetToken] = useState(() => new URLSearchParams(window.location.search).get('resetToken') || '')
+  const [resetPasswordForm, setResetPasswordForm] = useState({ password: '', confirmPassword: '' })
   const [busy, setBusy] = useState(false)
   const [darkMode, setDarkMode] = useState(() => {
     try {
@@ -269,18 +248,52 @@ function App() {
         method: 'POST',
         body: JSON.stringify(loginForm),
       })
-      if (result.requiresOtp) {
-        setLoginChallenge(result.challenge)
-        setLoginOtpEmail(result.email)
-        setLoginOtpCode('')
-        setLoginForm((current) => ({ ...current, password: '' }))
-        notify(`A verification code was sent to ${result.email}.`)
-        return
-      }
       sessionStorage.setItem('libraryflow-token', result.token)
       sessionStorage.setItem('libraryflow-user', JSON.stringify(result.user))
       setUser(result.user)
       notify(`Welcome back, ${result.user.name.split(' ')[0]}.`)
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function requestPasswordReset(event) {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      const result = await api('/auth/password-reset/request', {
+        method: 'POST',
+        body: JSON.stringify({ username: loginForm.email }),
+      })
+      setLoginMode('forgot-sent')
+      notify(result.message)
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function completePasswordReset(event) {
+    event.preventDefault()
+    if (resetPasswordForm.password !== resetPasswordForm.confirmPassword) {
+      notify('The new passwords do not match.')
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await api('/auth/password-reset/complete', {
+        method: 'POST',
+        body: JSON.stringify({ token: passwordResetToken, password: resetPasswordForm.password }),
+      })
+      window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`)
+      setPasswordResetToken('')
+      setResetPasswordForm({ password: '', confirmPassword: '' })
+      setLoginForm((current) => ({ ...current, password: '' }))
+      setLoginMode('signin')
+      notify(result.message)
     } catch (error) {
       notify(error.message)
     } finally {
@@ -355,13 +368,13 @@ function App() {
     }
     setBusy(true)
     try {
-      const result = await api('/loans', {
+      await api('/loans', {
         method: 'POST',
         body: JSON.stringify({ ...loanForm, bookId: Number(loanForm.bookId), memberId: Number(loanForm.memberId), quantity: Number(loanForm.quantity) }),
       })
       setModal(null)
       setLoanForm({ bookId: '', bookSearch: '', memberId: '', memberSearch: '', quantity: '1', dueDate: '', copyCode: '' })
-      notify(`${loanForm.quantity} ${Number(loanForm.quantity) === 1 ? 'copy' : 'copies'} checked out successfully.${result.emailNotification === 'queued' ? ' A notice was queued for the member.' : ' No member email is on file.'}`)
+      notify(`${loanForm.quantity} ${Number(loanForm.quantity) === 1 ? 'copy' : 'copies'} checked out successfully.`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -385,11 +398,11 @@ function App() {
     }
     setBusy(true)
     try {
-      const result = await api(`/loans/${loan.id}/${action}`, { method: 'POST', body: JSON.stringify({ quantity }) })
+      await api(`/loans/${loan.id}/${action}`, { method: 'POST', body: JSON.stringify({ quantity }) })
       setModal(null)
       notify(action === 'return'
         ? `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of “${loan.bookTitle}” returned.`
-        : `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of “${loan.bookTitle}” marked missed.${result.emailNotification === 'queued' ? ' A notice was queued for the member.' : ' No member email is on file.'}`)
+        : `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of “${loan.bookTitle}” marked missed.`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -618,13 +631,14 @@ function App() {
       <Login
         form={loginForm}
         setForm={setLoginForm}
-        challenge={loginChallenge}
-        otpEmail={loginOtpEmail}
-        otpCode={loginOtpCode}
-        setOtpCode={setLoginOtpCode}
+        mode={loginMode}
+        onModeChange={setLoginMode}
+        resetToken={passwordResetToken}
+        resetForm={resetPasswordForm}
+        setResetForm={setResetPasswordForm}
         onSubmit={handleLogin}
-        onVerifyOtp={verifyLoginOtp}
-        onBackToLogin={() => { setLoginChallenge(null); setLoginOtpCode('') }}
+        onRequestReset={requestPasswordReset}
+        onCompleteReset={completePasswordReset}
         busy={busy}
         toast={toast}
       />
@@ -695,10 +709,6 @@ function App() {
               </div>
               <button onClick={() => setDarkMode((current) => !current)} aria-label={`Switch to ${darkMode ? 'light' : 'dark'} mode`} title={`Switch to ${darkMode ? 'light' : 'dark'} mode`} className="rounded-xl border border-[#edf0eb] p-2.5 text-[#77847b] hover:bg-[#f7f8f5]">
                 {darkMode ? <Sun size={17} strokeWidth={1.8} /> : <Moon size={17} strokeWidth={1.8} />}
-              </button>
-              <button onClick={() => notify('You’re all caught up.')} aria-label="Notifications" className="relative rounded-xl border border-[#edf0eb] p-2.5 text-[#77847b] hover:bg-[#f7f8f5]">
-                <Bell size={17} strokeWidth={1.8} />
-                {dashboard?.overdueLoans > 0 && <span className="absolute right-2 top-2 size-1.5 rounded-full bg-[#dc8c6e]" />}
               </button>
               <div className="hidden h-8 w-px bg-[#edf0eb] sm:block" />
               <div className="hidden text-right sm:block"><p className="text-[12px] font-bold">{user.name}</p><p className="mt-0.5 text-[10px] text-[#8c978f]">{user.role}</p></div>
@@ -985,7 +995,16 @@ function UserCard({ user, onLogout }) {
   )
 }
 
-function Login({ form, setForm, challenge, otpEmail, otpCode, setOtpCode, onSubmit, onVerifyOtp, onBackToLogin, busy, toast }) {
+function Login({ form, setForm, mode, onModeChange, resetToken, resetForm, setResetForm, onSubmit, onRequestReset, onCompleteReset, busy, toast }) {
+  const [showPassword, setShowPassword] = useState(false)
+  const [showResetPassword, setShowResetPassword] = useState(false)
+  const isReset = mode === 'reset'
+  const isForgot = mode === 'forgot' || mode === 'forgot-sent'
+  const openForgotPassword = () => {
+    setForm((current) => ({ ...current, password: '' }))
+    onModeChange('forgot')
+  }
+
   return (
     <main className="grid min-h-screen bg-white lg:grid-cols-[1fr_1fr]">
       <section className="relative hidden overflow-hidden bg-[#284737] p-12 text-white lg:flex lg:flex-col lg:justify-between xl:p-16">
@@ -1007,20 +1026,43 @@ function Login({ form, setForm, challenge, otpEmail, otpCode, setOtpCode, onSubm
       <section className="flex min-h-screen items-center justify-center px-6 py-12 sm:px-10">
         <div className="w-full max-w-[380px]">
           <div className="mb-11 lg:hidden"><Brand /></div>
-          <p className="text-[11px] font-bold uppercase tracking-[.17em] text-[#79917e]">{challenge ? 'Extra sign-in check' : 'Welcome back'}</p>
-          <h2 className="mt-3 text-[32px] font-bold tracking-[-.055em]">{challenge ? 'Verify it’s you' : 'Sign in to your library'}</h2>
-          <p className="mt-2 text-[13px] leading-6 text-[#8b958e]">{challenge ? `Enter the six-digit code sent to ${otpEmail}. The code expires in 10 minutes.` : 'A good day to discover something new.'}</p>
-          {challenge ? (
-            <form onSubmit={onVerifyOtp} className="mt-8 space-y-5">
-              <Field label="Email verification code"><input required autoFocus autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otpCode} onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))} /></Field>
-              <button disabled={busy || otpCode.length !== 6} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3.5 text-[13px] font-bold text-white transition hover:bg-[#284a39] disabled:cursor-wait disabled:opacity-70">{busy ? 'Verifying…' : 'Verify and sign in'} <ArrowRight size={15} /></button>
-              <button type="button" onClick={onBackToLogin} disabled={busy} className="w-full rounded-xl border border-[#e5eae3] px-4 py-3 text-[12px] font-semibold text-[#536258] hover:bg-[#f7f8f5] disabled:opacity-60">Back to sign in</button>
-            </form>
+          <p className="text-[11px] font-bold uppercase tracking-[.17em] text-[#79917e]">{isReset ? 'Password recovery' : isForgot ? 'Forgot password' : 'Welcome back'}</p>
+          <h2 className="mt-3 text-[32px] font-bold tracking-[-.055em]">{isReset ? 'Choose a new password' : mode === 'forgot-sent' ? 'Check your email' : isForgot ? 'Reset your password' : 'Sign in to your library'}</h2>
+          <p className="mt-2 text-[13px] leading-6 text-[#8b958e]">
+            {isReset
+              ? resetToken ? 'Choose a new password for your librarian account.' : 'This reset link is missing. Request a new link below.'
+              : mode === 'forgot-sent'
+                ? 'If the librarian username matches, a one-time reset link will be sent to the configured mailbox.'
+                : isForgot
+                  ? 'Enter your librarian username and we’ll email a one-time reset link.'
+                  : 'A good day to discover something new.'}
+          </p>
+          {isReset ? (
+            resetToken ? (
+              <form onSubmit={onCompleteReset} className="mt-8 space-y-5">
+                <Field label="New password"><div className="relative"><input required autoComplete="new-password" minLength={12} maxLength={72} type={showResetPassword ? 'text' : 'password'} value={resetForm.password} onChange={(event) => setResetForm({ ...resetForm, password: event.target.value })} /><button type="button" onClick={() => setShowResetPassword((visible) => !visible)} aria-label={showResetPassword ? 'Hide password' : 'Show password'} className="absolute inset-y-0 right-3 text-[#77847b]">{showResetPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></Field>
+                <Field label="Confirm new password"><input required autoComplete="new-password" minLength={12} maxLength={72} type={showResetPassword ? 'text' : 'password'} value={resetForm.confirmPassword} onChange={(event) => setResetForm({ ...resetForm, confirmPassword: event.target.value })} /></Field>
+                <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3.5 text-[13px] font-bold text-white transition hover:bg-[#284a39] disabled:cursor-wait disabled:opacity-70">{busy ? 'Resetting password…' : 'Set new password'} <ArrowRight size={15} /></button>
+              </form>
+            ) : (
+              <button type="button" onClick={() => onModeChange('forgot')} className="mt-8 w-full rounded-xl bg-[#315c46] px-4 py-3.5 text-[13px] font-bold text-white">Request a new reset link</button>
+            )
+          ) : isForgot ? (
+            mode === 'forgot-sent' ? (
+              <button type="button" onClick={() => onModeChange('signin')} className="mt-8 w-full rounded-xl border border-[#e5eae3] px-4 py-3 text-[12px] font-semibold text-[#536258] hover:bg-[#f7f8f5]">Back to sign in</button>
+            ) : (
+              <form onSubmit={onRequestReset} className="mt-8 space-y-5">
+                <Field label="Username"><input required autoComplete="username" type="text" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
+                <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3.5 text-[13px] font-bold text-white transition hover:bg-[#284a39] disabled:cursor-wait disabled:opacity-70">{busy ? 'Sending link…' : 'Email reset link'} <ArrowRight size={15} /></button>
+                <button type="button" onClick={() => onModeChange('signin')} disabled={busy} className="w-full rounded-xl border border-[#e5eae3] px-4 py-3 text-[12px] font-semibold text-[#536258] hover:bg-[#f7f8f5] disabled:opacity-60">Back to sign in</button>
+              </form>
+            )
           ) : (
             <form onSubmit={onSubmit} className="mt-8 space-y-5">
               <Field label="Username"><input required autoComplete="username" type="text" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
-              <Field label="Password"><input required autoComplete="current-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
+              <Field label="Password"><div className="relative"><input required autoComplete="current-password" type={showPassword ? 'text' : 'password'} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute inset-y-0 right-3 text-[#77847b]">{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></Field>
               <button disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3.5 text-[13px] font-bold text-white transition hover:bg-[#284a39] disabled:cursor-wait disabled:opacity-70">{busy ? 'Signing you in…' : 'Sign in'} <ArrowRight size={15} /></button>
+              <button type="button" onClick={openForgotPassword} className="w-full text-[12px] font-semibold text-[#536b5a] hover:underline">Forgot password?</button>
             </form>
           )}
           <div className="mt-8 rounded-xl border border-[#e9ede7] bg-[#fafbf9] p-4"><SchoolContact /></div>

@@ -24,11 +24,5 @@
         "service": "frontend"
       }
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/cron/overdue",
-      "schedule": "0 8 * * *"
-    }
   ]
 }

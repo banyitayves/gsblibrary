@@ -115,39 +115,19 @@ export async function migrateSchoolDirectory(connection) {
     `UPDATE users SET name = ? WHERE role = 'Librarian' AND name <> ?`,
     ['NSHIMIYIMANA Yves', 'NSHIMIYIMANA Yves'],
   )
-  await migrateEmailNotifications(connection)
+  await migratePasswordResetTokens(connection)
 }
 
-export async function migrateEmailNotifications(connection) {
+export async function migratePasswordResetTokens(connection) {
   await connection.query(
-    `CREATE TABLE IF NOT EXISTS email_login_codes (
+    `CREATE TABLE IF NOT EXISTS password_reset_tokens (
       user_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-      code_hash CHAR(64) NOT NULL,
-      challenge_hash CHAR(64) NOT NULL UNIQUE,
+      token_hash CHAR(64) NOT NULL UNIQUE,
       expires_at DATETIME NOT NULL,
-      attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
       last_sent_at DATETIME NOT NULL,
       send_date DATE NOT NULL,
       send_count TINYINT UNSIGNED NOT NULL DEFAULT 1,
-      CONSTRAINT fk_email_login_codes_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB`,
-  )
-  await connection.query(
-    `CREATE TABLE IF NOT EXISTS email_outbox (
-      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-      event_key VARCHAR(160) NOT NULL UNIQUE,
-      event_type ENUM('checkout', 'missed', 'overdue') NOT NULL,
-      recipient VARCHAR(190) NOT NULL,
-      recipient_name VARCHAR(120) NOT NULL,
-      subject VARCHAR(255) NOT NULL,
-      text_body TEXT NOT NULL,
-      attempts INT UNSIGNED NOT NULL DEFAULT 0,
-      next_attempt_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      locked_until DATETIME NULL,
-      sent_at DATETIME NULL,
-      last_error VARCHAR(500) NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_email_outbox_pending (sent_at, next_attempt_at, locked_until)
+      CONSTRAINT fk_password_reset_tokens_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB`,
   )
 }
