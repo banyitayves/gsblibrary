@@ -65,11 +65,11 @@ In **Vercel → Project → Settings → Environment Variables**, configure thes
 | `DB_NAME` | Database name, e.g. `library_management` |
 | `DB_SSL` | `true` when required by the database provider (`true` for TiDB Cloud Starter) |
 | `JWT_SECRET` | Unique random value of at least 32 characters |
-| `SMTP_HOST` | SMTP relay hostname (`smtp-relay.brevo.com` for Brevo) |
+| `SMTP_HOST` | Gmail: `smtp.gmail.com`; Brevo: `smtp-relay.brevo.com` |
 | `SMTP_PORT` | `587` for STARTTLS, or `465` for TLS |
-| `SMTP_USER` | SMTP login from the provider's SMTP settings |
-| `SMTP_PASSWORD` | Private SMTP key/password from the provider |
-| `SMTP_FROM_EMAIL` | Verified sender address at the provider |
+| `SMTP_USER` | Gmail address, or SMTP login from the provider |
+| `SMTP_PASSWORD` | Google App Password or private SMTP key/password (not your Gmail password) |
+| `SMTP_FROM_EMAIL` | The authenticated Gmail address or verified provider sender |
 | `SMTP_FROM_NAME` | Optional sender name, such as `GS Busanza Library` |
 | `OTP_DELIVERY_EMAIL` | Staff mailbox for librarian login codes |
 | `CRON_SECRET` | Unique random secret used to authorize daily overdue reminders |
@@ -150,7 +150,9 @@ When checking out a title, enter the optional copy/accession code printed inside
 
 The app can send librarian sign-in codes and member emails for checkouts, missed books, and overdue loans. Checkout and missed-book emails are queued with the circulation transaction; overdue reminders are sent at most once per loan per day. Messages go only to the email address recorded on the member. Outbound messages use a database-backed outbox and retry temporary delivery failures.
 
-For Brevo, create an account yourself, verify a sender address, and copy the SMTP login and SMTP key from **SMTP & API → SMTP** into local `.env` or deployment secrets. Use the SMTP relay hostname and port shown above; never put credentials in source control or send them in chat. Brevo's official [SMTP relay documentation](https://developers.brevo.com/docs/smtp-integration) describes its relay. Provider free-plan eligibility, daily limits, verification requirements, and deliverability can change; check the current plan before relying on it. The app itself adds no paid mail service.
+For the selected Gmail setup, configure `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER` and `SMTP_FROM_EMAIL` as `nshimiyeyves12@gmail.com`, and `OTP_DELIVERY_EMAIL` as the mailbox that should receive librarian codes. Set `SMTP_PASSWORD` to a dedicated Google App Password, **not** your Google account password. Google requires 2-Step Verification to create an App Password and recommends OAuth when the client supports it; see [Google's App Password instructions](https://support.google.com/accounts/answer/185833) and create it at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). Some managed or school Google accounts may disable App Passwords. App Passwords are sensitive credentials; enter them only in local ignored `.env` or deployment secrets, never in source control or chat. Gmail limits automated sending and may block/restrict unusual activity, so verify current limits and monitor delivery.
+
+If you later use Brevo, create and verify a sender on a domain you control, configure that domain's authentication records, then copy the SMTP login and SMTP key from **SMTP & API → SMTP** into deployment secrets. See Brevo's official [SMTP relay documentation](https://developers.brevo.com/docs/smtp-integration). Do not impersonate a `@gmail.com` sender through Brevo; sender authentication and delivery are controlled by Google.
 
 For an existing database, run `npm.cmd run db:migrate:directory` before deploying; this also creates the OTP and email-outbox tables. Vercel runs the protected `/api/cron/overdue` endpoint daily at 08:00 UTC using `CRON_SECRET`. For a local always-on API, the email worker checks overdue loans and pending messages every 15 minutes. When a member has no email address, the app displays that no email notice could be queued.
 
