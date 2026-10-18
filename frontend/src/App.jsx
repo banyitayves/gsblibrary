@@ -56,6 +56,12 @@ const today = () => {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
+const timeGreeting = () => {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good morning'
+  if (hour < 18) return 'Good afternoon'
+  return 'Good evening'
+}
 const memberCsvHeaders = 'name,member_type,class_section,membership_number,email,phone'
 const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,publication_year,grade,shelf_location,category'
 const reportDefinitions = {
@@ -746,7 +752,7 @@ function App() {
               <div className="lg:hidden"><Brand compact /></div>
               <div className="hidden lg:block">
                 <p className="mb-0.5 text-[10px] font-bold uppercase tracking-[.14em] text-[#a0aaa2]">Library / {page}</p>
-                <h1 className="truncate text-[17px] font-bold tracking-[-.03em]">{page === 'Dashboard' ? 'Good morning' : page}</h1>
+                <h1 className="truncate text-[17px] font-bold tracking-[-.03em]">{page === 'Dashboard' ? timeGreeting() : page}</h1>
               </div>
               <h1 className="truncate text-[16px] font-bold lg:hidden">{page}</h1>
             </div>
@@ -776,6 +782,7 @@ function App() {
         <main className="mx-auto max-w-[1440px] px-5 py-7 sm:px-8 sm:py-9">
           {page === 'Dashboard' && (
             <Dashboard
+              user={user}
               dashboard={dashboard}
               books={books}
               loans={loans}
@@ -1166,7 +1173,7 @@ function ActionButton({ children, onClick, secondary = false, icon: Icon = Plus,
   return <button type={type} onClick={onClick} disabled={disabled} className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[11px] font-bold transition disabled:cursor-wait disabled:opacity-60 ${secondary ? 'border border-[#e5eae3] bg-white text-[#536258] hover:bg-[#f7f8f5]' : 'bg-[#315c46] text-white hover:bg-[#284a39]'}`}><Icon size={14} />{children}</button>
 }
 
-function Dashboard({ dashboard, books, loans, activity, onNavigate, onIssue }) {
+function Dashboard({ user, dashboard, books, loans, activity, onNavigate, onIssue }) {
   const chart = dashboard?.chart || []
   const maxValue = Math.max(...chart.map((item) => item.value), 1)
   const stats = [
@@ -1180,7 +1187,11 @@ function Dashboard({ dashboard, books, loans, activity, onNavigate, onIssue }) {
 
   return (
     <>
-      <PageHeading eyebrow="Your library at a glance" title="A lovely day to turn a page." description="Here’s what’s happening around the library today.">
+      <PageHeading
+        eyebrow="Your school librarian"
+        title={<span className="flex items-center gap-4"><img src="/librarian-photo.jpg" alt="Librarian portrait" className="size-14 shrink-0 rounded-full border-2 border-white object-cover shadow-sm" /><span>{timeGreeting()}</span></span>}
+        description={`Welcome back, ${user.name}. Here’s what’s happening around the library today.`}
+      >
         <ActionButton secondary icon={Download} onClick={() => onNavigate('Catalog')}>Browse collection</ActionButton>
         <ActionButton onClick={onIssue}>Check out a book</ActionButton>
       </PageHeading>
