@@ -98,6 +98,10 @@ function groupReminderRecipients(members, loans, includeLoan) {
 function checkoutReceiptMessage({ memberName, loans, dueDate }) {
   return `Hello ${memberName},\n\nHere is a copy of the books checked out to you:\n${loans.map((loan) => `- ${loan.bookTitle}: ${loan.quantity} ${Number(loan.quantity) === 1 ? 'copy' : 'copies'}`).join('\n')}\n\nDue date: ${dueDate}\n\nPlease return the books by the due date. Thank you!\n\nGS Busanza Library`
 }
+function gmailComposeUrl(to, subject, body) {
+  const parameters = new URLSearchParams({ view: 'cm', fs: '1', to, su: subject, body })
+  return `https://mail.google.com/mail/?${parameters.toString()}`
+}
 function returnSummaryMessage({ memberName, bookTitle, returnedThisTime, missingThisTime, outstandingQuantity, outstandingLoans, totalOutstanding, totalReturned, totalMissing }) {
   const outstandingLines = outstandingLoans.length
     ? outstandingLoans.map((loan) => `- ${loan.bookTitle}: ${loan.outstandingQuantity} ${Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'} (due ${loan.dueDate})`).join('\n')
@@ -1163,10 +1167,12 @@ function App() {
               <div className="grid gap-2 sm:grid-cols-2">
                 {modal.email && (
                   <a
-                    href={`mailto:${encodeURIComponent(modal.email)}?subject=${encodeURIComponent('GS Busanza Library return update')}&body=${encodeURIComponent(returnSummaryMessage(modal))}`}
+                    href={gmailComposeUrl(modal.email, 'GS Busanza Library return update', returnSummaryMessage(modal))}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3 text-[11px] font-bold text-white hover:bg-[#284a39]"
                   >
-                    Email return summary
+                    Open Gmail: return summary
                   </a>
                 )}
                 {whatsappNumber(modal.phone) && (
@@ -1209,10 +1215,12 @@ function App() {
               <div className="grid gap-2 sm:grid-cols-2">
                 {modal.email && (
                   <a
-                    href={`mailto:${encodeURIComponent(modal.email)}?subject=${encodeURIComponent('GS Busanza Library checkout receipt')}&body=${encodeURIComponent(checkoutReceiptMessage(modal))}`}
+                    href={gmailComposeUrl(modal.email, 'GS Busanza Library checkout receipt', checkoutReceiptMessage(modal))}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3 text-[11px] font-bold text-white hover:bg-[#284a39]"
                   >
-                    Email checkout copy
+                    Open Gmail: checkout copy
                   </a>
                 )}
                 {whatsappNumber(modal.phone) && (
@@ -1230,7 +1238,7 @@ function App() {
               <p className="rounded-lg bg-[#f7f8f5] px-3 py-2 text-[11px] text-[#748078]">This member has no saved email address or valid WhatsApp number. Add contact details to their member profile to prepare a message.</p>
             )}
             <button type="button" onClick={() => setModal(null)} className="w-full rounded-xl border border-[#e8ece6] px-4 py-2.5 text-[11px] font-bold text-[#738077] hover:bg-[#f7f8f5]">Done</button>
-            <p className="text-center text-[10px] text-[#929d94]">Messages open in your email or WhatsApp app for you to review and send.</p>
+            <p className="text-center text-[10px] text-[#929d94]">Email opens in Gmail in a new tab; review and press Send. WhatsApp opens separately.</p>
           </div>
         </Modal>
       )}
