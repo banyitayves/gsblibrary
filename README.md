@@ -106,6 +106,7 @@ This changes the single librarian account's username and bcrypt password without
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
 - Name, membership-number, class, and member-type search and filters
 - Book checkout with an optional physical copy/accession code, multi-title quantity checkout for teachers (up to 300 active copies), a one-book student limit, returned/missing copy reconciliation, and overdue tracking
+- Manual, personalized WhatsApp return reminders for borrowers whose books are due today or overdue
 - Daily library attendance for students and teachers, optional reading-book records, frequent-visitor rankings, and date-based CSV export
 - Borrower counts and filtered circulation/class reports
 - Audit history for library actions
@@ -120,6 +121,10 @@ name,member_type,class_section,membership_number,email,phone
 ```
 
 For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email, phone, and membership number may be blank; missing numbers are generated. Duplicate membership numbers, email addresses, and matching names in the same member type and class are skipped and reported, both within the CSV and against existing members. Phone and email values are stored for directory use. Imports accept up to 5,000 rows per file.
+
+### WhatsApp return reminders
+
+In **Loans & returns**, choose **WhatsApp reminders** to see borrowers with books due today or overdue. The list groups outstanding titles by member and prepares a personalized reminder in WhatsApp when you open a chat. Review and send each message yourself; the app does not send messages automatically. Members need a usable phone number. International numbers should include their country code (for example, `+250...`); 10-digit Rwandan numbers beginning with `0` are also supported.
 
 ### Separate reports
 

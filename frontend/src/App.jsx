@@ -17,6 +17,7 @@ import {
   LayoutDashboard,
   LibraryBig,
   LogOut,
+  MessageCircle,
   Moon,
   Plus,
   Search,
@@ -61,6 +62,14 @@ const timeGreeting = () => {
   if (hour < 12) return 'Good morning'
   if (hour < 18) return 'Good afternoon'
   return 'Good evening'
+}
+function whatsappNumber(phone = '') {
+  const value = String(phone).trim()
+  let digits = value.replace(/\D/g, '')
+  if (value.startsWith('00')) digits = digits.slice(2)
+  else if (/^0\d{9}$/.test(digits)) digits = `250${digits.slice(1)}`
+  if (!/^[1-9]\d{7,14}$/.test(digits)) return null
+  return digits
 }
 const memberCsvHeaders = 'name,member_type,class_section,membership_number,email,phone'
 const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,publication_year,grade,shelf_location,category'
@@ -255,6 +264,24 @@ function App() {
     ),
     [loans, loanFilter, search],
   )
+  const dueReminderRecipients = useMemo(() => {
+    const membersById = new Map(members.map((member) => [Number(member.id), member]))
+    const recipients = new Map()
+    for (const loan of loans) {
+      if (Number(loan.outstandingQuantity) < 1 || loan.dueDate > today()) continue
+      const member = membersById.get(Number(loan.memberId))
+      if (!member) continue
+      let recipient = recipients.get(Number(member.id))
+      if (!recipient) {
+        recipient = { ...member, loans: [] }
+        recipients.set(Number(member.id), recipient)
+      }
+      recipient.loans.push(loan)
+    }
+    return [...recipients.values()]
+      .map((recipient) => ({ ...recipient, whatsappNumber: whatsappNumber(recipient.phone) }))
+      .sort((left, right) => left.name.localeCompare(right.name))
+  }, [loans, members])
 
   async function handleLogin(event) {
     event.preventDefault()
@@ -845,6 +872,8 @@ function App() {
               onIssue={openLoanForm}
               onReturn={(loan) => openLoanAction('return', loan)}
               onMissed={(loan) => openLoanAction('missed', loan)}
+              reminders={dueReminderRecipients}
+              onOpenReminders={() => setModal({ type: 'reminders' })}
               busy={busy}
             />
           )}
@@ -1044,6 +1073,47 @@ function App() {
             </p>
             <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Save return details" />
           </form>
+        </Modal>
+      )}
+
+      {modal?.type === 'reminders' && (
+        <Modal
+          title="WhatsApp return reminders"
+          subtitle="Only borrowers with books due today or overdue are listed. Chats open one at a time for you to review and send."
+          onClose={() => setModal(null)}
+        >
+          {dueReminderRecipients.length === 0 ? (
+            <p className="rounded-xl bg-[#f7f8f5] p-4 text-[11px] text-[#748078]">No books are due today or overdue.</p>
+          ) : (
+            <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+              {dueReminderRecipients.map((recipient) => {
+                const reminderLines = recipient.loans
+                  .map((loan) => {
+                    const dueLabel = loan.dueDate < today() ? `overdue since ${loan.dueDate}` : 'due today'
+                    return `• ${loan.bookTitle} (${loan.outstandingQuantity} ${Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'}, ${dueLabel})`
+                  })
+                  .join('\n')
+                const message = `Hello ${recipient.name}, this is a friendly reminder from GS Busanza Library. Please return these book${recipient.loans.length === 1 ? '' : 's'}:\n${reminderLines}\n\nThank you!`
+                const chatUrl = recipient.whatsappNumber
+                  ? `https://wa.me/${recipient.whatsappNumber}?text=${encodeURIComponent(message)}`
+                  : ''
+                return (
+                  <article key={recipient.id} className="rounded-xl border border-[#e9ede7] p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-bold text-[#46584b]">{recipient.name}</p>
+                        <p className="mt-1 text-[10px] text-[#8a958d]">{recipient.phone || 'No phone number saved'}</p>
+                      </div>
+                      {chatUrl
+                        ? <a href={chatUrl} target="_blank" rel="noopener noreferrer" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#e8f4eb] px-3 py-2 text-[10px] font-bold text-[#28644b] hover:bg-[#dceee1]"><MessageCircle size={13} /> Open WhatsApp</a>
+                        : <span className="shrink-0 rounded-lg bg-[#f7f8f5] px-3 py-2 text-[10px] font-semibold text-[#929d94]">Add international phone</span>}
+                    </div>
+                    <p className="mt-2 whitespace-pre-line text-[10px] leading-relaxed text-[#748078]">{reminderLines}</p>
+                  </article>
+                )
+              })}
+            </div>
+          )}
         </Modal>
       )}
 
@@ -1530,10 +1600,11 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
   )
 }
 
-function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn, onMissed, busy }) {
+function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn, onMissed, reminders, onOpenReminders, busy }) {
   return (
     <>
       <PageHeading eyebrow="Every story has a return date" title="Loans & returns" description="Keep track of books finding their way back home.">
+        <ActionButton secondary icon={MessageCircle} onClick={onOpenReminders}>WhatsApp reminders ({reminders.length})</ActionButton>
         <ActionButton onClick={onIssue}>Check out a book</ActionButton>
       </PageHeading>
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
