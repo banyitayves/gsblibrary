@@ -98,6 +98,9 @@ function groupReminderRecipients(members, loans, includeLoan) {
 function checkoutReceiptMessage({ memberName, loans, dueDate }) {
   return `Hello ${memberName},\n\nHere is a copy of the books checked out to you:\n${loans.map((loan) => `- ${loan.bookTitle} (Grade ${loan.grade || 'not recorded'}): ${loan.quantity} ${Number(loan.quantity) === 1 ? 'copy' : 'copies'}`).join('\n')}\n\nDue date: ${dueDate}\n\nPlease return the books by the due date. Thank you!\n\nGS Busanza Library`
 }
+function borrowerBooksMessage({ memberName, loans }) {
+  return `Hello ${memberName},\n\nHere is a copy of all books you currently have borrowed from GS Busanza Library:\n${loans.map((loan) => `- ${loan.bookTitle} (Grade ${loan.grade || 'not recorded'}): ${loan.outstandingQuantity} ${Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'} (due ${loan.dueDate})`).join('\n')}\n\nPlease return them by their due dates. Thank you!\n\nGS Busanza Library`
+}
 function gmailComposeUrl(to, subject, body) {
   const parameters = new URLSearchParams({ view: 'cm', fs: '1', to, su: subject, body })
   return `https://mail.google.com/mail/?${parameters.toString()}`
@@ -191,6 +194,8 @@ function App() {
   const [importResult, setImportResult] = useState(null)
   const [bookImportResult, setBookImportResult] = useState(null)
   const [modal, setModal] = useState(null)
+  const [selectedBorrowerIds, setSelectedBorrowerIds] = useState([])
+  const [borrowerSearch, setBorrowerSearch] = useState('')
   const [bookForm, setBookForm] = useState(initialBook)
   const [memberForm, setMemberForm] = useState({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
   const [loanForm, setLoanForm] = useState(initialLoanForm)
@@ -309,6 +314,16 @@ function App() {
     () => groupReminderRecipients(members, loans, (loan) => loan.dueDate === dateInDays(1)),
     [loans, members],
   )
+  const activeBorrowerRecipients = useMemo(() => {
+    const catalogById = new Map(books.map((book) => [Number(book.id), book]))
+    return groupReminderRecipients(members, loans, () => true).map((recipient) => ({
+      ...recipient,
+      loans: recipient.loans.map((loan) => ({
+        ...loan,
+        grade: catalogById.get(Number(loan.bookId))?.grade || '',
+      })),
+    }))
+  }, [books, loans, members])
 
   async function handleLogin(event) {
     event.preventDefault()
@@ -943,6 +958,12 @@ function App() {
               onOpenReminders={() => setModal({ type: 'reminders' })}
               smsReminders={tomorrowSmsRecipients}
               onOpenSmsReminders={() => setModal({ type: 'smsReminders' })}
+              activeBorrowers={activeBorrowerRecipients}
+              onOpenBorrowerMessages={() => {
+                setSelectedBorrowerIds([])
+                setBorrowerSearch('')
+                setModal({ type: 'borrowerMessages' })
+              }}
               busy={busy}
             />
           )}
@@ -1333,6 +1354,89 @@ function App() {
             </div>
           )}
           <p className="mt-4 text-center text-[10px] text-[#929d94]">Gmail opens in a new tab; review and press Send. Review and send each SMS yourself; carrier charges may apply.</p>
+        </Modal>
+      )}
+
+      {modal?.type === 'borrowerMessages' && (
+        <Modal
+          title="Messages for borrowers"
+          subtitle="Select up to 10 members with outstanding books. Open each prepared Gmail or WhatsApp message separately and send it yourself."
+          onClose={() => setModal(null)}
+        >
+          <div className="space-y-4">
+            <Field label="Find borrower">
+              <input value={borrowerSearch} onChange={(event) => setBorrowerSearch(event.target.value)} placeholder="Search name, membership number, email, or phone…" />
+            </Field>
+            <p className="text-[10px] font-semibold text-[#748078]">{selectedBorrowerIds.length} of 10 selected · {activeBorrowerRecipients.length} borrowers have books outstanding</p>
+            {activeBorrowerRecipients.length === 0 ? (
+              <p className="rounded-xl bg-[#f7f8f5] p-4 text-[11px] text-[#748078]">No members currently have books outstanding.</p>
+            ) : (
+              <div className="max-h-[34vh] space-y-2 overflow-y-auto">
+                {activeBorrowerRecipients
+                  .filter((recipient) => (
+                    [recipient.name, recipient.membershipNumber, recipient.email, recipient.phone]
+                      .join(' ')
+                      .toLowerCase()
+                      .includes(borrowerSearch.trim().toLowerCase())
+                  ))
+                  .map((recipient) => {
+                    const selected = selectedBorrowerIds.includes(Number(recipient.id))
+                    const atLimit = selectedBorrowerIds.length >= 10
+                    return (
+                      <label key={recipient.id} className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#e9ede7] p-3">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 accent-[#315c46]"
+                          checked={selected}
+                          disabled={!selected && atLimit}
+                          onChange={() => setSelectedBorrowerIds((current) => (
+                            selected
+                              ? current.filter((id) => id !== Number(recipient.id))
+                              : current.length < 10 ? [...current, Number(recipient.id)] : current
+                          ))}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[11px] font-bold text-[#46584b]">{recipient.name}</span>
+                          <span className="mt-1 block text-[10px] text-[#8a958d]">{recipient.email || 'No email'} · {recipient.phone || 'No phone'}</span>
+                          <span className="mt-2 block text-[10px] leading-relaxed text-[#748078]">
+                            {recipient.loans.map((loan) => `${loan.bookTitle} · Grade ${loan.grade || 'not recorded'} · ${loan.outstandingQuantity} out · due ${loan.dueDate}`).join('; ')}
+                          </span>
+                        </span>
+                      </label>
+                    )
+                  })}
+              </div>
+            )}
+            {selectedBorrowerIds.length > 0 && (
+              <div className="max-h-[34vh] space-y-3 overflow-y-auto border-t border-[#edf0eb] pt-4">
+                <p className="text-[11px] font-bold text-[#56665a]">Prepared messages</p>
+                {activeBorrowerRecipients
+                  .filter((recipient) => selectedBorrowerIds.includes(Number(recipient.id)))
+                  .map((recipient) => {
+                    const message = borrowerBooksMessage({ memberName: recipient.name, loans: recipient.loans })
+                    return (
+                      <article key={recipient.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#f7f8f5] p-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-[11px] font-bold text-[#46584b]">{recipient.name}</p>
+                          <p className="mt-1 text-[10px] text-[#8a958d]">{recipient.loans.length} active {recipient.loans.length === 1 ? 'title' : 'titles'}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {recipient.email && (
+                            <a href={gmailComposeUrl(recipient.email, 'GS Busanza Library: your borrowed books', message)} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-[#315c46] px-3 py-2 text-[10px] font-bold text-white hover:bg-[#284a39]">Open Gmail</a>
+                          )}
+                          {recipient.messagingNumber && (
+                            <a href={`https://wa.me/${recipient.messagingNumber}?text=${encodeURIComponent(message)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-[#e8f4eb] px-3 py-2 text-[10px] font-bold text-[#28644b] hover:bg-[#dceee1]"><MessageCircle size={13} /> Open WhatsApp</a>
+                          )}
+                          {!recipient.email && !recipient.messagingNumber && <span className="text-[10px] text-[#929d94]">Add email or international phone</span>}
+                        </div>
+                      </article>
+                    )
+                  })}
+              </div>
+            )}
+            <button type="button" onClick={() => setModal(null)} className="w-full rounded-xl border border-[#e8ece6] px-4 py-2.5 text-[11px] font-bold text-[#738077] hover:bg-[#f7f8f5]">Done</button>
+            <p className="text-center text-[10px] text-[#929d94]">No messages are sent automatically. Gmail opens a draft; WhatsApp opens a chat for each selected member.</p>
+          </div>
         </Modal>
       )}
 
@@ -1819,10 +1923,11 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
   )
 }
 
-function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn, onMissed, reminders, onOpenReminders, smsReminders, onOpenSmsReminders, busy }) {
+function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn, onMissed, reminders, onOpenReminders, smsReminders, onOpenSmsReminders, activeBorrowers, onOpenBorrowerMessages, busy }) {
   return (
     <>
       <PageHeading eyebrow="Every story has a return date" title="Loans & returns" description="Keep track of books finding their way back home.">
+        <ActionButton secondary icon={UsersRound} onClick={onOpenBorrowerMessages}>Message borrowers ({activeBorrowers.length})</ActionButton>
         <ActionButton secondary icon={MessageCircle} onClick={onOpenReminders}>WhatsApp reminders ({reminders.length})</ActionButton>
         <ActionButton secondary icon={MessageSquareText} onClick={onOpenSmsReminders}>SMS due tomorrow ({smsReminders.length})</ActionButton>
         <ActionButton onClick={onIssue}>Check out a book</ActionButton>

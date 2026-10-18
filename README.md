@@ -108,6 +108,7 @@ This changes the single librarian account's username and bcrypt password without
 - Name, membership-number, class, and member-type search and filters
 - Book checkout with an optional physical copy/accession code, multi-title quantity checkout for teachers (up to 300 active copies), a one-book student limit, returned/missing copy reconciliation, and overdue tracking
 - Manual Gmail and WhatsApp return reminders for borrowers whose books are due today or overdue
+- Manually select up to 10 borrowers with outstanding books and prepare individual Gmail or WhatsApp messages listing all their active titles, grades, quantities, and due dates
 - Prepared, manual SMS reminders for borrowers with books due tomorrow
 - Daily library attendance for students and teachers, optional reading-book records, frequent-visitor rankings, and date-based CSV export
 - Borrower counts and filtered circulation/class reports
@@ -131,6 +132,8 @@ After a checkout succeeds, choose **Open Gmail: checkout copy** or **WhatsApp ch
 In **Loans & returns**, choose **WhatsApp reminders** to see borrowers with books due today or overdue. The list groups outstanding titles by member and prepares a personalized message for Gmail and/or WhatsApp. Gmail opens a compose window in a new tab; review and press **Send**. WhatsApp opens a chat for you to review and send. The app does not send messages automatically. Members need a saved email address and/or a usable phone number. International numbers should include their country code (for example, `+250...`); 10-digit Rwandan numbers beginning with `0` are also supported.
 
 Choose **SMS due tomorrow** to prepare a Gmail reminder and/or a text message for each borrower with an outstanding book due the following day. Gmail opens a prefilled compose window; SMS opens in your device's messaging app. Review and send messages yourself; automatic messaging is not used, and your carrier may charge for texts. Members need a saved email address and/or a phone number in international format or a 10-digit Rwandan number beginning with `0`.
+
+To message several borrowers who currently have books outstanding, choose **Message borrowers** in **Loans & returns**. Search for and select up to 10 members; each selected member gets their own prepared Gmail and/or WhatsApp option with every outstanding title, grade, copy count, and due date. Choose each channel separately and review/send each message yourself. Nothing is sent automatically.
 
 ### Separate reports
 
