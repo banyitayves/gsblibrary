@@ -1545,6 +1545,18 @@ function Login({ form, setForm, mode, onModeChange, resetToken, resetForm, setRe
             </form>
           )}
           <div className="mt-8 rounded-xl border border-[#e9ede7] bg-[#fafbf9] p-4"><SchoolContact /></div>
+          <div className="mt-4 flex items-center gap-3 rounded-xl border border-[#e9ede7] bg-white p-4">
+            <img src="/librarian-photo.jpg" alt="NSHIMIYIMANA Yves" className="size-14 shrink-0 rounded-full object-cover" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium text-[#8b958e]">Developed by</p>
+              <p className="truncate text-[12px] font-bold text-[#34443b]">NSHIMIYIMANA Yves</p>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[#65756a]">
+                <a href="mailto:nshimiyeyves12@gmail.com" className="underline underline-offset-2">nshimiyeyves12@gmail.com</a>
+                <a href="tel:+250791756160" className="underline underline-offset-2">+250791756160</a>
+                <a href="https://wa.me/250791756160" target="_blank" rel="noreferrer" className="underline underline-offset-2">WhatsApp</a>
+              </div>
+            </div>
+          </div>
           <p className="mt-8 text-center text-[10px] text-[#a1aaa2]">Your library, always in good hands.</p>
         </div>
         {toast && <div role="alert" className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-[#263b31] px-4 py-3 text-sm text-white shadow-xl">{toast}</div>}
