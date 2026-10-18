@@ -102,10 +102,10 @@ This changes the single librarian account's username and bcrypt password without
 - Dashboard with live collection, loan, member, and overdue totals
 - Searchable book catalog with add, edit, delete, and CSV import/export; deletion is blocked for books with loan history
 - GS Busanza student directory for S1A–S6MCE classes and a separate teacher directory
-- Edit member details and, for administrators, delete members that have no loan or attendance history
+- Add and edit members; Administrators and Librarians can delete members with no loan or attendance history
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
 - Name, membership-number, class, and member-type search and filters
-- Book checkout with an optional physical copy/accession code, quantity checkout for teachers (up to 300 active copies), a one-book student limit, partial returns, partial missed-copy tracking, and overdue tracking
+- Book checkout with an optional physical copy/accession code, multi-title quantity checkout for teachers (up to 300 active copies), a one-book student limit, returned/missing copy reconciliation, and overdue tracking
 - Daily library attendance for students and teachers, optional reading-book records, frequent-visitor rankings, and date-based CSV export
 - Borrower counts and filtered circulation/class reports
 - Audit history for library actions
@@ -141,9 +141,9 @@ The title and total copy count are required. ISBN, publisher, author, delivery d
 
 The header includes a sun/moon button to switch between light and dark themes. Your choice is saved in this browser.
 
-At checkout, each student may have at most **1 active book** at a time. Teachers can check out several copies of one title in a single record, up to **300 active copies** across all titles. Returns and missed-book processing can be applied to part of a multi-copy checkout; returned copies increase available inventory and missed copies reduce total inventory.
+At checkout, each student may have at most **1 active book** at a time. Teachers can check out multiple titles and quantities in one checkout, up to **300 active copies** across all titles (for example, 30 Kinyarwanda and 2 Biology books). When recording a return, enter how many copies are available again and how many are missing. Any copies not included in either quantity remain outstanding. Returned copies increase available inventory; missing copies reduce total inventory.
 
-If checked-out copies are lost, use **Loans & returns → Mark missed** and enter the number of copies. This reduces the book title's total inventory by that number without increasing available copies and records who had them. Missed copies appear in the **Missed books** report and can be filtered by name, class, book, and date, then downloaded as CSV, PDF, or Excel. Loan lists and reports show quantities issued, returned, missed, and still outstanding.
+If checked-out copies are lost, use **Loans & returns → Mark missed** and enter their quantity in the return dialog's **Copies missing** field. This reduces the book title's total inventory by that number without increasing available copies and records who had them. Missed copies appear in the **Missed books** report and can be filtered by name, class, book, and date, then downloaded as CSV, PDF, or Excel. Loan lists and reports show quantities issued, returned, missed, and still outstanding.
 
 When checking out a title, enter the optional copy/accession code printed inside that physical copy. The code appears on loan records and loan reports, and the same code cannot be used on another checkout while its loan still has outstanding copies.
 

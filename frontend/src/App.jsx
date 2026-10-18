@@ -46,6 +46,12 @@ const navigation = [
 ]
 
 const initialBook = { isbn: '', title: '', author: '', publisher: '', category: '', grade: '', shelf: '', totalCopies: 1, deliveredOn: '', publicationYear: '' }
+const initialLoanForm = () => ({
+  memberId: '',
+  memberSearch: '',
+  dueDate: '',
+  items: [{ bookId: '', bookSearch: '', quantity: '1', copyCode: '' }],
+})
 const today = () => {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -106,6 +112,10 @@ function initials(name = '') {
   return name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
 }
 
+function checkoutBookLabel(book) {
+  return `${book.title} · ${book.category || 'Uncategorized'} · Grade ${book.grade || 'not recorded'} · ${book.isbn || 'No ISBN'} · ${book.author || 'No author'} · ${book.shelf || 'No shelf'} · ${book.availableCopies} available`
+}
+
 function App() {
   const [user, setUser] = useState(userFromSession)
   const [page, setPage] = useState('Dashboard')
@@ -131,8 +141,8 @@ function App() {
   const [modal, setModal] = useState(null)
   const [bookForm, setBookForm] = useState(initialBook)
   const [memberForm, setMemberForm] = useState({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
-  const [loanForm, setLoanForm] = useState({ bookId: '', bookSearch: '', memberId: '', memberSearch: '', quantity: '1', dueDate: '', copyCode: '' })
-  const [loanActionQuantity, setLoanActionQuantity] = useState('1')
+  const [loanForm, setLoanForm] = useState(initialLoanForm)
+  const [loanActionQuantities, setLoanActionQuantities] = useState({ returned: '1', missed: '0' })
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const [loginMode, setLoginMode] = useState(() => new URLSearchParams(window.location.search).has('resetToken') ? 'reset' : 'signin')
   const [passwordResetToken, setPasswordResetToken] = useState(() => new URLSearchParams(window.location.search).get('resetToken') || '')
@@ -362,19 +372,32 @@ function App() {
 
   async function issueLoan(event) {
     event.preventDefault()
-    if (!loanForm.bookId || !loanForm.memberId) {
+    const items = loanForm.items.map((item) => ({
+      bookId: Number(item.bookId),
+      quantity: Number(item.quantity),
+      copyCode: item.copyCode.trim(),
+    }))
+    if (!loanForm.memberId || items.some((item) => !item.bookId || !Number.isInteger(item.quantity) || item.quantity < 1)) {
       notify('Choose a book and an active student or teacher from the suggestions.')
+      return
+    }
+    if (selectedLoanMember?.memberType === 'Student' && (items.length !== 1 || items[0].quantity !== 1)) {
+      notify('Students may check out only one book at a time.')
+      return
+    }
+    if (selectedLoanQuantity > selectedMemberRemaining) {
+      notify(`This member can check out ${selectedMemberRemaining} more ${selectedMemberRemaining === 1 ? 'copy' : 'copies'}.`)
       return
     }
     setBusy(true)
     try {
-      await api('/loans', {
+      await api('/loans/batch', {
         method: 'POST',
-        body: JSON.stringify({ ...loanForm, bookId: Number(loanForm.bookId), memberId: Number(loanForm.memberId), quantity: Number(loanForm.quantity) }),
+        body: JSON.stringify({ memberId: Number(loanForm.memberId), dueDate: loanForm.dueDate, items }),
       })
       setModal(null)
-      setLoanForm({ bookId: '', bookSearch: '', memberId: '', memberSearch: '', quantity: '1', dueDate: '', copyCode: '' })
-      notify(`${loanForm.quantity} ${Number(loanForm.quantity) === 1 ? 'copy' : 'copies'} checked out successfully.`)
+      setLoanForm(initialLoanForm())
+      notify(`${selectedLoanQuantity} ${selectedLoanQuantity === 1 ? 'copy' : 'copies'} across ${items.length} ${items.length === 1 ? 'title' : 'titles'} checked out successfully.`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -384,25 +407,30 @@ function App() {
   }
 
   function openLoanAction(action, loan) {
-    setLoanActionQuantity('1')
+    setLoanActionQuantities(action === 'return' ? { returned: '1', missed: '0' } : { returned: '0', missed: '1' })
     setModal({ type: 'loanAction', action, loan })
   }
 
   async function saveLoanAction(event) {
     event.preventDefault()
-    const { action, loan } = modal
-    const quantity = Number(loanActionQuantity)
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > Number(loan.outstandingQuantity)) {
-      notify(`Enter a quantity from 1 to ${loan.outstandingQuantity}.`)
+    const { loan } = modal
+    const returnedQuantity = Number(loanActionQuantities.returned)
+    const missedQuantity = Number(loanActionQuantities.missed)
+    if (!Number.isInteger(returnedQuantity) || returnedQuantity < 0
+      || !Number.isInteger(missedQuantity) || missedQuantity < 0
+      || returnedQuantity + missedQuantity < 1
+      || returnedQuantity + missedQuantity > Number(loan.outstandingQuantity)) {
+      notify(`Enter returned and missing quantities that total from 1 to ${loan.outstandingQuantity}.`)
       return
     }
     setBusy(true)
     try {
-      await api(`/loans/${loan.id}/${action}`, { method: 'POST', body: JSON.stringify({ quantity }) })
+      const result = await api(`/loans/${loan.id}/reconcile`, {
+        method: 'POST',
+        body: JSON.stringify({ returnedQuantity, missedQuantity }),
+      })
       setModal(null)
-      notify(action === 'return'
-        ? `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of “${loan.bookTitle}” returned.`
-        : `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of “${loan.bookTitle}” marked missed.`)
+      notify(`${returnedQuantity} returned, ${missedQuantity} missing; ${result.outstandingQuantity} still outstanding for “${loan.bookTitle}”.`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -645,14 +673,34 @@ function App() {
     )
   }
 
-  const canAdminister = user.role === 'Administrator'
   const canManageLibraryData = ['Administrator', 'Librarian'].includes(user.role)
   const availableBooks = books.filter((book) => book.availableCopies > 0)
   const selectedLoanMember = members.find((member) => String(member.id) === loanForm.memberId)
-  const selectedLoanBook = books.find((book) => String(book.id) === loanForm.bookId)
+  const selectedLoanItems = loanForm.items.map((item) => ({
+    ...item,
+    book: books.find((book) => String(book.id) === item.bookId),
+  }))
+  const selectedLoanQuantity = loanForm.items.reduce((total, item) => (
+    total + (item.bookId ? Number(item.quantity) || 0 : 0)
+  ), 0)
   const selectedMemberLimit = selectedLoanMember?.memberType === 'Teacher' ? 300 : 1
   const selectedMemberRemaining = selectedLoanMember ? selectedMemberLimit - Number(selectedLoanMember.activeLoans || 0) : 1
-  const checkoutQuantityLimit = Math.max(0, Math.min(Number(selectedLoanBook?.availableCopies || 0), selectedMemberRemaining))
+  const canAddLoanItem = selectedLoanMember?.memberType === 'Teacher'
+    && selectedMemberRemaining > selectedLoanQuantity
+    && loanForm.items.length < availableBooks.length
+    && availableBooks.some((book) => !loanForm.items.some((item) => item.bookId === String(book.id)))
+
+  function openLoanForm() {
+    setLoanForm(initialLoanForm())
+    setModal({ type: 'loan' })
+  }
+
+  function updateLoanItem(index, updates) {
+    setLoanForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) => itemIndex === index ? { ...item, ...updates } : item),
+    }))
+  }
 
   return (
     <div className="min-h-screen bg-[#f7f8f5] text-[#1d302b]">
@@ -733,7 +781,7 @@ function App() {
               loans={loans}
               activity={activity}
               onNavigate={setPage}
-              onIssue={() => setModal({ type: 'loan' })}
+              onIssue={openLoanForm}
             />
           )}
           {page === 'Catalog' && (
@@ -778,7 +826,6 @@ function App() {
               }}
               onDelete={deleteMember}
               canManage={canManageLibraryData}
-              canAdminister={canAdminister}
             />
           )}
           {page === 'Loans' && (
@@ -788,7 +835,7 @@ function App() {
               setSearch={setSearch}
               filter={loanFilter}
               setFilter={setLoanFilter}
-              onIssue={() => setModal({ type: 'loan' })}
+              onIssue={openLoanForm}
               onReturn={(loan) => openLoanAction('return', loan)}
               onMissed={(loan) => openLoanAction('missed', loan)}
               busy={busy}
@@ -864,42 +911,15 @@ function App() {
 
       {modal?.type === 'loan' && (
         <Modal title="Check out a book" subtitle="Choose a member and an available title." onClose={() => setModal(null)}>
-          {availableBooks.length === 0 || members.every((member) => member.status !== 'Active') ? (
+          {availableBooks.length === 0 || members.every((member) => {
+            const limit = member.memberType === 'Teacher' ? 300 : 1
+            return member.status !== 'Active' || Number(member.activeLoans || 0) >= limit
+          }) ? (
             <div className="rounded-xl bg-[#f7f8f5] p-4 text-sm leading-relaxed text-[#748078]">
-              {availableBooks.length === 0 ? 'There are no available copies right now.' : 'Add an active member before creating a loan.'}
+              {availableBooks.length === 0 ? 'There are no available copies right now.' : 'No active student or teacher is currently below their checkout limit.'}
             </div>
           ) : (
             <form className="space-y-4" onSubmit={issueLoan}>
-              <Field label="Book">
-                <input
-                  required
-                  autoComplete="off"
-                  list="checkout-books"
-                  placeholder="Search title, ISBN, author, shelf…"
-                  value={loanForm.bookSearch || ''}
-                  onChange={(event) => {
-                    const bookSearch = event.target.value
-                    const book = availableBooks.find((item) => `${item.title} · Grade ${item.grade || 'not recorded'} · ${item.isbn || 'No ISBN'} · ${item.author || 'No author'} · ${item.shelf || 'No shelf'} · ${item.availableCopies} available` === bookSearch)
-                    setLoanForm({
-                      ...loanForm,
-                      bookId: book ? String(book.id) : '',
-                      bookSearch,
-                      quantity: book ? String(Math.max(1, Math.min(Number(loanForm.quantity) || 1, Number(book.availableCopies)))) : loanForm.quantity,
-                    })
-                  }}
-                />
-                <datalist id="checkout-books">
-                  {availableBooks.map((book) => <option key={book.id} value={`${book.title} · Grade ${book.grade || 'not recorded'} · ${book.isbn || 'No ISBN'} · ${book.author || 'No author'} · ${book.shelf || 'No shelf'} · ${book.availableCopies} available`} />)}
-                </datalist>
-              </Field>
-              {selectedLoanBook && (
-                <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#f6f8f4] p-3 text-[10px]">
-                  <div className="col-span-2"><span className="block text-[#929d94]">Title</span><span className="mt-0.5 block font-bold">{selectedLoanBook.title}</span></div>
-                  <div><span className="block text-[#929d94]">Shelf</span><span className="mt-0.5 block font-semibold">{selectedLoanBook.shelf || 'Not recorded'}</span></div>
-                  <div><span className="block text-[#929d94]">Date delivered</span><span className="mt-0.5 block font-semibold">{selectedLoanBook.deliveredOn || 'Not recorded'}</span></div>
-                  <div><span className="block text-[#929d94]">Grade</span><span className="mt-0.5 block font-semibold">{selectedLoanBook.grade || 'Not recorded'}</span></div>
-                </div>
-              )}
               <Field label="Member">
                 <input
                   required
@@ -912,10 +932,17 @@ function App() {
                     const member = members.find((item) => {
                       const limit = item.memberType === 'Teacher' ? 300 : 1
                       return item.status === 'Active'
-                        && `${item.name} · ${item.memberType}${item.classSection ? ` · ${item.classSection}` : ''} · ${item.membershipNumber} · ${item.activeLoans || 0}/${limit} copies${Number(item.activeLoans || 0) >= limit ? ' · limit reached' : ''}` === memberSearch
+                        && `${item.name} · ${item.memberType}${item.classSection ? ` · ${item.classSection}` : ''} · ${item.membershipNumber} · ${item.activeLoans || 0}/${limit} copies` === memberSearch
                         && Number(item.activeLoans || 0) < limit
                     })
-                    setLoanForm({ ...loanForm, memberId: member ? String(member.id) : '', memberSearch, quantity: '1' })
+                    setLoanForm({
+                      ...loanForm,
+                      memberId: member ? String(member.id) : '',
+                      memberSearch,
+                      items: member?.memberType === 'Student'
+                        ? [{ ...loanForm.items[0], quantity: '1' }]
+                        : loanForm.items,
+                    })
                   }}
                 />
                 <datalist id="checkout-members">
@@ -928,15 +955,61 @@ function App() {
                   })}
                 </datalist>
               </Field>
-              {selectedLoanMember?.memberType === 'Teacher' && (
-                <Field label="Number of copies">
-                  <input required type="number" min="1" max={checkoutQuantityLimit} value={loanForm.quantity} onChange={(event) => setLoanForm({ ...loanForm, quantity: event.target.value })} />
-                </Field>
-              )}
-              {selectedLoanMember && <p className="rounded-lg bg-[#f3f6f1] px-3 py-2 text-[11px] text-[#607667]">{selectedLoanMember.memberType === 'Teacher' ? `Teacher limit: ${selectedLoanMember.activeLoans || 0} of 300 active copies; ${selectedLoanBook?.availableCopies || 0} copies available for this title.` : 'Students may check out one book at a time.'}</p>}
-              <Field label="Code inside this physical book (optional)"><input maxLength="64" autoComplete="off" value={loanForm.copyCode} onChange={(event) => setLoanForm({ ...loanForm, copyCode: event.target.value })} placeholder="Enter the book's copy / accession code" /></Field>
+              {selectedLoanMember && <p className="rounded-lg bg-[#f3f6f1] px-3 py-2 text-[11px] text-[#607667]">{selectedLoanMember.memberType === 'Teacher' ? `Teacher limit: ${selectedLoanMember.activeLoans || 0} of 300 active copies; ${selectedMemberRemaining} more may be checked out across different titles.` : 'Students may have only one active book checked out.'}</p>}
+              <div className="space-y-3">
+                {loanForm.items.map((item, index) => {
+                  const selectedItem = selectedLoanItems[index]
+                  const otherQuantity = loanForm.items.reduce((total, otherItem, itemIndex) => (
+                    total + (itemIndex === index || !otherItem.bookId ? 0 : Number(otherItem.quantity) || 0)
+                  ), 0)
+                  const quantityLimit = Math.max(1, Math.min(
+                    Number(selectedItem.book?.availableCopies || 1),
+                    selectedLoanMember?.memberType === 'Teacher' ? selectedMemberRemaining - otherQuantity : 1,
+                  ))
+                  const options = availableBooks.filter((book) => (
+                    !loanForm.items.some((otherItem, itemIndex) => itemIndex !== index && otherItem.bookId === String(book.id))
+                  ))
+                  return (
+                    <section key={index} className="space-y-3 rounded-xl border border-[#e9ede7] p-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-bold text-[#56665a]">Book {index + 1}</p>
+                        {loanForm.items.length > 1 && <button type="button" onClick={() => setLoanForm((current) => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }))} aria-label={`Remove book ${index + 1}`} className="rounded-lg p-1.5 text-[#a57665] hover:bg-[#f9eee9]"><X size={14} /></button>}
+                      </div>
+                      <Field label="Book title">
+                        <input
+                          required
+                          autoComplete="off"
+                          list={`checkout-books-${index}`}
+                          placeholder="Search title, subject, ISBN, author, shelf…"
+                          value={item.bookSearch}
+                          onChange={(event) => {
+                            const bookSearch = event.target.value
+                            const book = options.find((candidate) => checkoutBookLabel(candidate) === bookSearch)
+                            const quantity = book
+                              ? Math.max(1, Math.min(Number(item.quantity) || 1, Number(book.availableCopies), selectedLoanMember?.memberType === 'Teacher' ? selectedMemberRemaining - otherQuantity : 1))
+                              : item.quantity
+                            updateLoanItem(index, { bookId: book ? String(book.id) : '', bookSearch, quantity: String(quantity) })
+                          }}
+                        />
+                        <datalist id={`checkout-books-${index}`}>
+                          {options.map((book) => <option key={book.id} value={checkoutBookLabel(book)} />)}
+                        </datalist>
+                      </Field>
+                      {selectedItem.book && <p className="text-[10px] text-[#8b968d]">{selectedItem.book.availableCopies} copies available · {selectedItem.book.category || 'Uncategorized'}</p>}
+                      {selectedLoanMember?.memberType === 'Teacher' && selectedItem.book && (
+                        <Field label="Number of copies">
+                          <input required type="number" min="1" max={quantityLimit} value={item.quantity} onChange={(event) => updateLoanItem(index, { quantity: event.target.value })} />
+                        </Field>
+                      )}
+                      <Field label="Copy code (optional)"><input maxLength="64" autoComplete="off" value={item.copyCode} onChange={(event) => updateLoanItem(index, { copyCode: event.target.value })} placeholder="Physical book copy / accession code" /></Field>
+                    </section>
+                  )
+                })}
+              </div>
+              {selectedLoanMember?.memberType === 'Teacher' && <button type="button" disabled={!canAddLoanItem} onClick={() => setLoanForm((current) => ({ ...current, items: [...current.items, { bookId: '', bookSearch: '', quantity: '1', copyCode: '' }] }))} className="flex items-center gap-1.5 rounded-lg border border-[#e8ece6] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#f7f8f5] disabled:cursor-not-allowed disabled:opacity-50"><Plus size={13} /> Add another title</button>}
+              {selectedLoanMember?.memberType === 'Teacher' && <p className="text-[10px] text-[#8b968d]">{selectedLoanQuantity} of {selectedMemberRemaining} remaining checkout copies selected.</p>}
               <Field label="Due date"><input required type="date" min={today()} value={loanForm.dueDate} onChange={(event) => setLoanForm({ ...loanForm, dueDate: event.target.value })} /></Field>
-              <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Check out book" />
+              <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel={`Check out ${selectedLoanQuantity} ${selectedLoanQuantity === 1 ? 'copy' : 'copies'}`} />
             </form>
           )}
         </Modal>
@@ -944,8 +1017,8 @@ function App() {
 
       {modal?.type === 'loanAction' && (
         <Modal
-          title={modal.action === 'return' ? 'Return book copies' : 'Mark book copies missed'}
-          subtitle={modal.action === 'return' ? 'Confirm how many copies are being returned.' : 'Missed copies will be removed from the catalog inventory.'}
+          title="Record book returns"
+          subtitle="Enter returned and missing copies; anything left remains outstanding."
           onClose={() => setModal(null)}
         >
           <form className="space-y-4" onSubmit={saveLoanAction}>
@@ -953,10 +1026,16 @@ function App() {
               <p className="font-bold text-[#46584b]">{modal.loan.bookTitle}</p>
               <p className="mt-1">{modal.loan.memberName} · {modal.loan.outstandingQuantity} outstanding {Number(modal.loan.outstandingQuantity) === 1 ? 'copy' : 'copies'}</p>
             </div>
-            <Field label={`Number of copies to ${modal.action === 'return' ? 'return' : 'mark missed'}`}>
-              <input autoFocus required type="number" min="1" max={modal.loan.outstandingQuantity} value={loanActionQuantity} onChange={(event) => setLoanActionQuantity(event.target.value)} />
+            <Field label="Copies returned and available">
+              <input autoFocus required type="number" min="0" max={modal.loan.outstandingQuantity} value={loanActionQuantities.returned} onChange={(event) => setLoanActionQuantities((current) => ({ ...current, returned: event.target.value }))} />
             </Field>
-            <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel={modal.action === 'return' ? 'Confirm return' : 'Confirm missed copies'} />
+            <Field label="Copies missing">
+              <input required type="number" min="0" max={modal.loan.outstandingQuantity} value={loanActionQuantities.missed} onChange={(event) => setLoanActionQuantities((current) => ({ ...current, missed: event.target.value }))} />
+            </Field>
+            <p className="rounded-lg bg-[#f3f6f1] px-3 py-2 text-[11px] text-[#607667]">
+              {Math.max(0, Number(modal.loan.outstandingQuantity) - (Number(loanActionQuantities.returned) || 0) - (Number(loanActionQuantities.missed) || 0))} copies will remain outstanding after this update.
+            </p>
+            <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Save return details" />
           </form>
         </Modal>
       )}
@@ -1208,7 +1287,7 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
   )
 }
 
-function Members({ members, search, setSearch, typeFilter, setTypeFilter, classFilter, setClassFilter, importResult, busy, onImport, onExport, onAdd, onEdit, onDelete, canManage, canAdminister }) {
+function Members({ members, search, setSearch, typeFilter, setTypeFilter, classFilter, setClassFilter, importResult, busy, onImport, onExport, onAdd, onEdit, onDelete, canManage }) {
   return (
     <>
       <PageHeading eyebrow="GS Busanza school directory" title="Students & teachers" description={`${members.length} people match your directory filters`}>
@@ -1241,7 +1320,7 @@ function Members({ members, search, setSearch, typeFilter, setTypeFilter, classF
           <table className="w-full min-w-[900px] text-left">
             <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Student or teacher</th><th className="px-4 py-3.5">Type / class</th><th className="px-4 py-3.5">Membership no.</th><th className="px-4 py-3.5">Email</th><th className="px-4 py-3.5">Books out</th><th className="px-4 py-3.5">Status</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {members.map((member, index) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className={`flex size-9 items-center justify-center rounded-full text-[10px] font-bold ${['bg-[#edf2e9] text-[#6b846c]', 'bg-[#f2ede6] text-[#a17e5c]', 'bg-[#eeebf4] text-[#7e719a]', 'bg-[#f4ece8] text-[#a67762]'][index % 4]}`}>{initials(member.name)}</div><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td><td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}<p className="mt-1 text-[9px] text-[#929d94]">{member.phone || 'No phone provided'}</p></td><td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td><td className="px-5 py-4 text-right">{canManage && <button disabled={busy} onClick={() => onEdit(member)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Edit</button>}{canAdminister && <button disabled={busy} onClick={() => onDelete(member)} className="ml-1 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button>}</td></tr>)}
+              {members.map((member, index) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className={`flex size-9 items-center justify-center rounded-full text-[10px] font-bold ${['bg-[#edf2e9] text-[#6b846c]', 'bg-[#f2ede6] text-[#a17e5c]', 'bg-[#eeebf4] text-[#7e719a]', 'bg-[#f4ece8] text-[#a67762]'][index % 4]}`}>{initials(member.name)}</div><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td><td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}<p className="mt-1 text-[9px] text-[#929d94]">{member.phone || 'No phone provided'}</p></td><td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td><td className="px-5 py-4 text-right">{canManage && <><button disabled={busy} onClick={() => onEdit(member)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Edit</button><button disabled={busy} onClick={() => onDelete(member)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button></>}</td></tr>)}
               {members.length === 0 && <EmptyRow colSpan={7} message="No students or teachers match these filters. Import a CSV or add a person." />}
             </tbody>
           </table>

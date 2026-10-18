@@ -772,7 +772,7 @@ app.post('/api/members/import', ...canManage, asyncRoute(async (req, res) => {
   res.json({ imported: imported.length, skipped, invalid })
 }))
 
-app.delete('/api/members/:id', ...canAdminister, asyncRoute(async (req, res) => {
+app.delete('/api/members/:id', ...canManage, asyncRoute(async (req, res) => {
   const memberId = Number(req.params.id)
   if (!Number.isSafeInteger(memberId) || memberId < 1) {
     return res.status(400).json({ error: 'Member ID must be a positive integer.' })
@@ -1155,6 +1155,131 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
   }
 }))
 
+app.post('/api/loans/batch', ...canManage, asyncRoute(async (req, res) => {
+  const memberId = Number(req.body.memberId)
+  const dueDate = String(req.body.dueDate || '')
+  const items = req.body.items
+  if (!Number.isSafeInteger(memberId) || memberId < 1
+    || !Array.isArray(items) || items.length < 1 || items.length > 300
+    || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    return res.status(400).json({ error: 'Choose a member, one or more books, and a valid due date.' })
+  }
+  const normalizedItems = []
+  const bookIds = new Set()
+  const copyCodes = new Set()
+  let totalQuantity = 0
+  for (const item of items) {
+    if (!item || typeof item !== 'object') {
+      return res.status(400).json({ error: 'Each checkout line must contain a book, quantity, and optional copy code.' })
+    }
+    const bookId = Number(item.bookId)
+    const quantity = Number(item.quantity)
+    const copyCode = String(item.copyCode || '').trim()
+    if (!Number.isSafeInteger(bookId) || bookId < 1
+      || !Number.isInteger(quantity) || quantity < 1 || quantity > 300
+      || copyCode.length > 64 || bookIds.has(bookId)
+      || (copyCode && copyCodes.has(copyCode))) {
+      return res.status(400).json({ error: 'Each book must be unique and have a valid quantity and copy code.' })
+    }
+    bookIds.add(bookId)
+    if (copyCode) copyCodes.add(copyCode)
+    totalQuantity += quantity
+    normalizedItems.push({ bookId, quantity, copyCode })
+  }
+  if (totalQuantity > 300) {
+    return res.status(400).json({ error: 'A checkout cannot contain more than 300 copies.' })
+  }
+
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[member]] = await connection.execute(
+      'SELECT id, name, member_type AS memberType FROM members WHERE id = ? AND status = ? FOR UPDATE',
+      [memberId, 'Active'],
+    )
+    if (!member) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Active member not found.' })
+    }
+    if (member.memberType === 'Student' && (normalizedItems.length !== 1 || totalQuantity !== 1)) {
+      await connection.rollback()
+      return res.status(400).json({ error: 'Students may check out only one book at a time.' })
+    }
+
+    const [[loanCount]] = await connection.execute(
+      'SELECT COALESCE(SUM(quantity - returned_quantity - missed_quantity), 0) AS activeLoans FROM loans WHERE member_id = ? AND quantity > returned_quantity + missed_quantity',
+      [memberId],
+    )
+    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 1
+    if (Number(loanCount.activeLoans) + totalQuantity > maximumActiveLoans) {
+      await connection.rollback()
+      return res.status(409).json({
+        error: `${member.memberType}s may have at most ${maximumActiveLoans} active book${maximumActiveLoans === 1 ? '' : 's'} at a time; this member has ${loanCount.activeLoans} active book${Number(loanCount.activeLoans) === 1 ? '' : 's'}.`,
+      })
+    }
+
+    const booksById = new Map()
+    for (const { bookId } of [...normalizedItems].sort((left, right) => left.bookId - right.bookId)) {
+      const [[book]] = await connection.execute(
+        'SELECT id, title, available_copies FROM books WHERE id = ? FOR UPDATE',
+        [bookId],
+      )
+      if (!book) {
+        await connection.rollback()
+        return res.status(404).json({ error: 'One of the selected books was not found.' })
+      }
+      booksById.set(bookId, book)
+    }
+
+    for (const item of normalizedItems) {
+      const book = booksById.get(item.bookId)
+      if (Number(book.available_copies) < item.quantity) {
+        await connection.rollback()
+        return res.status(409).json({ error: `Only ${book.available_copies} ${Number(book.available_copies) === 1 ? 'copy is' : 'copies are'} available for "${book.title}".` })
+      }
+      if (item.copyCode) {
+        const [[existingCopy]] = await connection.execute(
+          'SELECT id FROM loans WHERE copy_code = ? AND quantity > returned_quantity + missed_quantity LIMIT 1 FOR UPDATE',
+          [item.copyCode],
+        )
+        if (existingCopy) {
+          await connection.rollback()
+          return res.status(409).json({ error: `Copy code "${item.copyCode}" is already checked out.` })
+        }
+      }
+    }
+
+    const createdLoans = []
+    for (const item of normalizedItems) {
+      const book = booksById.get(item.bookId)
+      const [result] = await connection.execute(
+        'INSERT INTO loans (book_id, member_id, due_date, quantity, copy_code) VALUES (?, ?, ?, ?, ?)',
+        [item.bookId, memberId, dueDate, item.quantity, item.copyCode || null],
+      )
+      await connection.execute(
+        'UPDATE books SET available_copies = available_copies - ? WHERE id = ?',
+        [item.quantity, item.bookId],
+      )
+      createdLoans.push({
+        id: result.insertId,
+        bookId: item.bookId,
+        bookTitle: book.title,
+        quantity: item.quantity,
+        copyCode: item.copyCode || null,
+      })
+    }
+    const details = `${totalQuantity} copies across ${createdLoans.length} title(s) checked out to ${member.name}: ${createdLoans.map((loan) => loan.bookTitle).join(', ')}`.slice(0, 500)
+    await audit(connection, req.user.name, 'Books checked out', `${details} checked out to ${member.name}`)
+    await connection.commit()
+    res.status(201).json({ memberId, memberName: member.name, dueDate, loans: createdLoans })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}))
+
 app.get('/api/library-visits', ...staff, asyncRoute(async (req, res) => {
   const visitDate = String(req.query.date || formatLocalDate(new Date()))
   if (!/^\d{4}-\d{2}-\d{2}$/.test(visitDate)
@@ -1426,6 +1551,85 @@ app.post('/api/loans/:id/missed', ...canManage, asyncRoute(async (req, res) => {
     throw error
   } finally {
     if (!connectionReleased) connection.release()
+  }
+}))
+
+app.post('/api/loans/:id/reconcile', ...canManage, asyncRoute(async (req, res) => {
+  const returnedQuantityInput = Number(req.body.returnedQuantity)
+  const missedQuantityInput = Number(req.body.missedQuantity)
+  if (!Number.isInteger(returnedQuantityInput) || returnedQuantityInput < 0 || returnedQuantityInput > 300
+    || !Number.isInteger(missedQuantityInput) || missedQuantityInput < 0 || missedQuantityInput > 300
+    || returnedQuantityInput + missedQuantityInput < 1) {
+    return res.status(400).json({ error: 'Enter at least one returned or missing copy, using quantities from 0 to 300.' })
+  }
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[loan]] = await connection.execute(
+      `SELECT l.id, l.book_id AS bookId, l.quantity,
+       l.returned_quantity AS returnedQuantity, l.missed_quantity AS missedQuantity,
+       b.title, m.name AS memberName
+       FROM loans l JOIN books b ON b.id = l.book_id
+       JOIN members m ON m.id = l.member_id
+       WHERE l.id = ? FOR UPDATE`,
+      [req.params.id],
+    )
+    if (!loan) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Loan not found.' })
+    }
+    const outstanding = Number(loan.quantity) - Number(loan.returnedQuantity) - Number(loan.missedQuantity)
+    if (returnedQuantityInput + missedQuantityInput > outstanding) {
+      await connection.rollback()
+      return res.status(400).json({ error: `Only ${outstanding} outstanding ${outstanding === 1 ? 'copy remains' : 'copies remain'} on this checkout.` })
+    }
+    if (missedQuantityInput > 0) {
+      const [[book]] = await connection.execute(
+        'SELECT total_copies FROM books WHERE id = ? FOR UPDATE',
+        [loan.bookId],
+      )
+      if (!book || Number(book.total_copies) < missedQuantityInput) {
+        await connection.rollback()
+        return res.status(409).json({ error: 'The catalog copy count cannot be reduced for this loan.' })
+      }
+      await connection.execute(
+        'UPDATE books SET total_copies = total_copies - ? WHERE id = ?',
+        [missedQuantityInput, loan.bookId],
+      )
+    }
+    if (returnedQuantityInput > 0) {
+      await connection.execute(
+        'UPDATE books SET available_copies = LEAST(total_copies, available_copies + ?) WHERE id = ?',
+        [returnedQuantityInput, loan.bookId],
+      )
+    }
+    const returnedQuantity = Number(loan.returnedQuantity) + returnedQuantityInput
+    const missedQuantity = Number(loan.missedQuantity) + missedQuantityInput
+    const complete = returnedQuantity + missedQuantity === Number(loan.quantity)
+    const returnedAt = complete && missedQuantity === 0 ? 'CURRENT_TIMESTAMP' : 'NULL'
+    const missedAt = missedQuantity > 0 ? 'COALESCE(missed_at, CURRENT_TIMESTAMP)' : 'missed_at'
+    await connection.execute(
+      `UPDATE loans SET returned_quantity = ?, missed_quantity = ?,
+       returned_at = ${returnedAt}, missed_at = ${missedAt} WHERE id = ?`,
+      [returnedQuantity, missedQuantity, loan.id],
+    )
+    await audit(
+      connection,
+      req.user.name,
+      'Book return reconciled',
+      `${returnedQuantityInput} ${returnedQuantityInput === 1 ? 'copy' : 'copies'} returned and ${missedQuantityInput} marked missing for "${loan.title}" from ${loan.memberName}`,
+    )
+    await connection.commit()
+    res.json({
+      returnedQuantity,
+      missedQuantity,
+      outstandingQuantity: outstanding - returnedQuantityInput - missedQuantityInput,
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
   }
 }))
 
