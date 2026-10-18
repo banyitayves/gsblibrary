@@ -98,8 +98,11 @@ function groupReminderRecipients(members, loans, includeLoan) {
 function checkoutReceiptMessage({ memberName, loans, dueDate }) {
   return `Hello ${memberName},\n\nHere is a copy of the books checked out to you:\n${loans.map((loan) => `- ${loan.bookTitle}: ${loan.quantity} ${Number(loan.quantity) === 1 ? 'copy' : 'copies'}`).join('\n')}\n\nDue date: ${dueDate}\n\nPlease return the books by the due date. Thank you!\n\nGS Busanza Library`
 }
-function returnSummaryMessage({ memberName, bookTitle, returnedThisTime, missingThisTime, outstandingQuantity, totalReturned, totalMissing }) {
-  return `Hello ${memberName},\n\nGS Busanza Library return update for "${bookTitle}":\n- Returned now: ${returnedThisTime}\n- Missing now: ${missingThisTime}\n- Still outstanding: ${outstandingQuantity}\n- Total returned: ${totalReturned}\n- Total missing: ${totalMissing}\n\nThank you!`
+function returnSummaryMessage({ memberName, bookTitle, returnedThisTime, missingThisTime, outstandingQuantity, outstandingLoans, totalOutstanding, totalReturned, totalMissing }) {
+  const outstandingLines = outstandingLoans.length
+    ? outstandingLoans.map((loan) => `- ${loan.bookTitle}: ${loan.outstandingQuantity} ${Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'} (due ${loan.dueDate})`).join('\n')
+    : 'None'
+  return `Hello ${memberName},\n\nGS Busanza Library return update for "${bookTitle}":\n- Returned now: ${returnedThisTime}\n- Missing now: ${missingThisTime}\n- Still outstanding for this title: ${outstandingQuantity}\n- Total returned: ${totalReturned}\n- Total missing: ${totalMissing}\n\nAll books still outstanding (${totalOutstanding} ${totalOutstanding === 1 ? 'copy' : 'copies'}):\n${outstandingLines}\n\nThank you!`
 }
 const memberCsvHeaders = 'name,member_type,class_section,membership_number,email,phone'
 const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,publication_year,grade,shelf_location,category'
@@ -491,6 +494,16 @@ function App() {
         method: 'POST',
         body: JSON.stringify({ returnedQuantity, missedQuantity }),
       })
+      const outstandingLoans = loans
+        .filter((memberLoan) => Number(memberLoan.memberId) === Number(loan.memberId))
+        .map((memberLoan) => ({
+          ...memberLoan,
+          outstandingQuantity: Number(memberLoan.id) === Number(loan.id)
+            ? Number(result.outstandingQuantity)
+            : Number(memberLoan.outstandingQuantity),
+        }))
+        .filter((memberLoan) => memberLoan.outstandingQuantity > 0)
+      const totalOutstanding = outstandingLoans.reduce((total, memberLoan) => total + memberLoan.outstandingQuantity, 0)
       setModal({
         type: 'returnComplete',
         memberName: loan.memberName,
@@ -501,6 +514,8 @@ function App() {
         returnedThisTime: returnedQuantity,
         missingThisTime: missedQuantity,
         outstandingQuantity: result.outstandingQuantity,
+        outstandingLoans,
+        totalOutstanding,
         totalReturned: result.returnedQuantity,
         totalMissing: result.missedQuantity,
       })
@@ -1132,9 +1147,17 @@ function App() {
               <ul className="mt-3 space-y-1">
                 <li>Returned now: {modal.returnedThisTime}</li>
                 <li>Missing now: {modal.missingThisTime}</li>
-                <li>Still outstanding: {modal.outstandingQuantity}</li>
+                <li>Still outstanding for this title: {modal.outstandingQuantity}</li>
                 <li>Total returned: {modal.totalReturned} · Total missing: {modal.totalMissing}</li>
               </ul>
+              <p className="mt-3 font-bold">All books still outstanding ({modal.totalOutstanding} {modal.totalOutstanding === 1 ? 'copy' : 'copies'}):</p>
+              {modal.outstandingLoans.length > 0 ? (
+                <ul className="mt-1 space-y-1">
+                  {modal.outstandingLoans.map((loan) => (
+                    <li key={loan.id}>{loan.bookTitle} · {loan.outstandingQuantity} {Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'} · due {loan.dueDate}</li>
+                  ))}
+                </ul>
+              ) : <p className="mt-1">None</p>}
             </div>
             {modal.email || whatsappNumber(modal.phone) ? (
               <div className="grid gap-2 sm:grid-cols-2">
