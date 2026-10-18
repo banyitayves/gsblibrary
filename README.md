@@ -108,6 +108,7 @@ This changes the single librarian account's username and bcrypt password without
 - Name, membership-number, class, and member-type search and filters
 - Book checkout with an optional physical copy/accession code, multi-title quantity checkout for teachers (up to 300 active copies), a one-book student limit, returned/missing copy reconciliation, and overdue tracking
 - Manual, personalized WhatsApp return reminders for borrowers whose books are due today or overdue
+- Prepared, manual SMS reminders for borrowers with books due tomorrow
 - Daily library attendance for students and teachers, optional reading-book records, frequent-visitor rankings, and date-based CSV export
 - Borrower counts and filtered circulation/class reports
 - Audit history for library actions
@@ -128,6 +129,8 @@ After a checkout succeeds, choose **Email checkout copy to member** to open a pr
 ### WhatsApp return reminders
 
 In **Loans & returns**, choose **WhatsApp reminders** to see borrowers with books due today or overdue. The list groups outstanding titles by member and prepares a personalized reminder in WhatsApp when you open a chat. Review and send each message yourself; the app does not send messages automatically. Members need a usable phone number. International numbers should include their country code (for example, `+250...`); 10-digit Rwandan numbers beginning with `0` are also supported.
+
+Choose **SMS due tomorrow** to prepare a text message for each borrower with an outstanding book due the following day. Open each message in your device's SMS app and send it yourself; automatic SMS is not used, and your carrier may charge for texts. Members need a phone number in international format or a 10-digit Rwandan number beginning with `0`.
 
 ### Separate reports
 

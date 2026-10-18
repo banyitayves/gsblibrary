@@ -18,6 +18,7 @@ import {
   LibraryBig,
   LogOut,
   MessageCircle,
+  MessageSquareText,
   Moon,
   Plus,
   Search,
@@ -57,6 +58,11 @@ const today = () => {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
+const dateInDays = (days) => {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
 const timeGreeting = () => {
   const hour = new Date().getHours()
   if (hour < 12) return 'Good morning'
@@ -70,6 +76,24 @@ function whatsappNumber(phone = '') {
   else if (/^0\d{9}$/.test(digits)) digits = `250${digits.slice(1)}`
   if (!/^[1-9]\d{7,14}$/.test(digits)) return null
   return digits
+}
+function groupReminderRecipients(members, loans, includeLoan) {
+  const membersById = new Map(members.map((member) => [Number(member.id), member]))
+  const recipients = new Map()
+  for (const loan of loans) {
+    if (Number(loan.outstandingQuantity) < 1 || !includeLoan(loan)) continue
+    const member = membersById.get(Number(loan.memberId))
+    if (!member) continue
+    let recipient = recipients.get(Number(member.id))
+    if (!recipient) {
+      recipient = { ...member, loans: [] }
+      recipients.set(Number(member.id), recipient)
+    }
+    recipient.loans.push(loan)
+  }
+  return [...recipients.values()]
+    .map((recipient) => ({ ...recipient, messagingNumber: whatsappNumber(recipient.phone) }))
+    .sort((left, right) => left.name.localeCompare(right.name))
 }
 const memberCsvHeaders = 'name,member_type,class_section,membership_number,email,phone'
 const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,publication_year,grade,shelf_location,category'
@@ -264,24 +288,14 @@ function App() {
     ),
     [loans, loanFilter, search],
   )
-  const dueReminderRecipients = useMemo(() => {
-    const membersById = new Map(members.map((member) => [Number(member.id), member]))
-    const recipients = new Map()
-    for (const loan of loans) {
-      if (Number(loan.outstandingQuantity) < 1 || loan.dueDate > today()) continue
-      const member = membersById.get(Number(loan.memberId))
-      if (!member) continue
-      let recipient = recipients.get(Number(member.id))
-      if (!recipient) {
-        recipient = { ...member, loans: [] }
-        recipients.set(Number(member.id), recipient)
-      }
-      recipient.loans.push(loan)
-    }
-    return [...recipients.values()]
-      .map((recipient) => ({ ...recipient, whatsappNumber: whatsappNumber(recipient.phone) }))
-      .sort((left, right) => left.name.localeCompare(right.name))
-  }, [loans, members])
+  const dueReminderRecipients = useMemo(
+    () => groupReminderRecipients(members, loans, (loan) => loan.dueDate <= today()),
+    [loans, members],
+  )
+  const tomorrowSmsRecipients = useMemo(
+    () => groupReminderRecipients(members, loans, (loan) => loan.dueDate === dateInDays(1)),
+    [loans, members],
+  )
 
   async function handleLogin(event) {
     event.preventDefault()
@@ -881,6 +895,8 @@ function App() {
               onMissed={(loan) => openLoanAction('missed', loan)}
               reminders={dueReminderRecipients}
               onOpenReminders={() => setModal({ type: 'reminders' })}
+              smsReminders={tomorrowSmsRecipients}
+              onOpenSmsReminders={() => setModal({ type: 'smsReminders' })}
               busy={busy}
             />
           )}
@@ -1133,8 +1149,8 @@ function App() {
                   })
                   .join('\n')
                 const message = `Hello ${recipient.name}, this is a friendly reminder from GS Busanza Library. Please return these book${recipient.loans.length === 1 ? '' : 's'}:\n${reminderLines}\n\nThank you!`
-                const chatUrl = recipient.whatsappNumber
-                  ? `https://wa.me/${recipient.whatsappNumber}?text=${encodeURIComponent(message)}`
+                const chatUrl = recipient.messagingNumber
+                  ? `https://wa.me/${recipient.messagingNumber}?text=${encodeURIComponent(message)}`
                   : ''
                 return (
                   <article key={recipient.id} className="rounded-xl border border-[#e9ede7] p-3">
@@ -1153,6 +1169,45 @@ function App() {
               })}
             </div>
           )}
+        </Modal>
+      )}
+
+      {modal?.type === 'smsReminders' && (
+        <Modal
+          title="SMS reminders for tomorrow"
+          subtitle={`These borrowers have books due ${dateInDays(1)}. Open a prepared text message to remind them before the books become overdue.`}
+          onClose={() => setModal(null)}
+        >
+          {tomorrowSmsRecipients.length === 0 ? (
+            <p className="rounded-xl bg-[#f7f8f5] p-4 text-[11px] text-[#748078]">No books are due tomorrow.</p>
+          ) : (
+            <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+              {tomorrowSmsRecipients.map((recipient) => {
+                const reminderLines = recipient.loans
+                  .map((loan) => `• ${loan.bookTitle} (${loan.outstandingQuantity} ${Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'})`)
+                  .join('\n')
+                const message = `Hello ${recipient.name}, this is a friendly reminder from GS Busanza Library that these books are due tomorrow (${dateInDays(1)}):\n${reminderLines}\nPlease return them on time. Thank you!`
+                const smsUrl = recipient.messagingNumber
+                  ? `sms:+${recipient.messagingNumber}?body=${encodeURIComponent(message)}`
+                  : ''
+                return (
+                  <article key={recipient.id} className="rounded-xl border border-[#e9ede7] p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-bold text-[#46584b]">{recipient.name}</p>
+                        <p className="mt-1 text-[10px] text-[#8a958d]">{recipient.phone || 'No phone number saved'}</p>
+                      </div>
+                      {smsUrl
+                        ? <a href={smsUrl} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#28644b] hover:bg-[#dceee1]"><MessageSquareText size={13} /> Prepare SMS</a>
+                        : <span className="shrink-0 rounded-lg bg-[#f7f8f5] px-3 py-2 text-[10px] font-semibold text-[#929d94]">Add international phone</span>}
+                    </div>
+                    <p className="mt-2 whitespace-pre-line text-[10px] leading-relaxed text-[#748078]">{reminderLines}</p>
+                  </article>
+                )
+              })}
+            </div>
+          )}
+          <p className="mt-4 text-center text-[10px] text-[#929d94]">Your device opens a prepared message. Review and send each SMS yourself; carrier charges may apply.</p>
         </Modal>
       )}
 
@@ -1639,11 +1694,12 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
   )
 }
 
-function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn, onMissed, reminders, onOpenReminders, busy }) {
+function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn, onMissed, reminders, onOpenReminders, smsReminders, onOpenSmsReminders, busy }) {
   return (
     <>
       <PageHeading eyebrow="Every story has a return date" title="Loans & returns" description="Keep track of books finding their way back home.">
         <ActionButton secondary icon={MessageCircle} onClick={onOpenReminders}>WhatsApp reminders ({reminders.length})</ActionButton>
+        <ActionButton secondary icon={MessageSquareText} onClick={onOpenSmsReminders}>SMS due tomorrow ({smsReminders.length})</ActionButton>
         <ActionButton onClick={onIssue}>Check out a book</ActionButton>
       </PageHeading>
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
