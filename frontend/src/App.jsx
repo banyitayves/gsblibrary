@@ -424,13 +424,20 @@ function App() {
     }
     setBusy(true)
     try {
-      await api('/loans/batch', {
+      const checkout = await api('/loans/batch', {
         method: 'POST',
         body: JSON.stringify({ memberId: Number(loanForm.memberId), dueDate: loanForm.dueDate, items }),
       })
-      setModal(null)
+      setModal({
+        type: 'checkoutComplete',
+        memberName: selectedLoanMember.name,
+        membershipNumber: selectedLoanMember.membershipNumber,
+        email: selectedLoanMember.email,
+        dueDate: loanForm.dueDate,
+        loans: checkout.loans,
+      })
       setLoanForm(initialLoanForm())
-      notify(`${selectedLoanQuantity} ${selectedLoanQuantity === 1 ? 'copy' : 'copies'} across ${items.length} ${items.length === 1 ? 'title' : 'titles'} checked out successfully.`)
+      notify(`${selectedLoanQuantity} ${selectedLoanQuantity === 1 ? 'copy' : 'copies'} checked out successfully.`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -1073,6 +1080,38 @@ function App() {
             </p>
             <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Save return details" />
           </form>
+        </Modal>
+      )}
+
+      {modal?.type === 'checkoutComplete' && (
+        <Modal
+          title="Checkout complete"
+          subtitle="Review the borrowed-book summary and email a copy to the member."
+          onClose={() => setModal(null)}
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl bg-[#f7f8f5] p-4 text-[11px] leading-relaxed text-[#748078]">
+              <p className="font-bold text-[#46584b]">{modal.memberName}</p>
+              <p className="mt-1">{modal.membershipNumber}{modal.email ? ` · ${modal.email}` : ''}</p>
+              <ul className="mt-3 space-y-1.5">
+                {modal.loans.map((loan) => (
+                  <li key={loan.id}>{loan.bookTitle} · {loan.quantity} {Number(loan.quantity) === 1 ? 'copy' : 'copies'} · due {modal.dueDate}</li>
+                ))}
+              </ul>
+            </div>
+            {modal.email ? (
+              <a
+                href={`mailto:${encodeURIComponent(modal.email)}?subject=${encodeURIComponent('GS Busanza Library checkout receipt')}&body=${encodeURIComponent(`Hello ${modal.memberName},\n\nHere is a copy of the books checked out to you:\n${modal.loans.map((loan) => `- ${loan.bookTitle}: ${loan.quantity} ${Number(loan.quantity) === 1 ? 'copy' : 'copies'}`).join('\n')}\n\nDue date: ${modal.dueDate}\n\nPlease return the books by the due date. Thank you!\n\nGS Busanza Library`)}`}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3 text-[11px] font-bold text-white hover:bg-[#284a39]"
+              >
+                Email checkout copy to member
+              </a>
+            ) : (
+              <p className="rounded-lg bg-[#f7f8f5] px-3 py-2 text-[11px] text-[#748078]">This member has no email address saved. Add one to their member profile to prepare checkout emails.</p>
+            )}
+            <button type="button" onClick={() => setModal(null)} className="w-full rounded-xl border border-[#e8ece6] px-4 py-2.5 text-[11px] font-bold text-[#738077] hover:bg-[#f7f8f5]">Done</button>
+            <p className="text-center text-[10px] text-[#929d94]">Your email app opens with the message ready; review and send it yourself.</p>
+          </div>
         </Modal>
       )}
 

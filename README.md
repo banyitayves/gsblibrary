@@ -104,6 +104,7 @@ This changes the single librarian account's username and bcrypt password without
 - GS Busanza student directory for S1A–S6MCE classes and a separate teacher directory
 - Add and edit members; Administrators and Librarians can delete members with no loan or attendance history
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
+- Optional single email address per member and a manually prepared checkout email listing only the books issued in that checkout
 - Name, membership-number, class, and member-type search and filters
 - Book checkout with an optional physical copy/accession code, multi-title quantity checkout for teachers (up to 300 active copies), a one-book student limit, returned/missing copy reconciliation, and overdue tracking
 - Manual, personalized WhatsApp return reminders for borrowers whose books are due today or overdue
@@ -120,7 +121,9 @@ Download either CSV template from **Students & teachers**. Both templates use th
 name,member_type,class_section,membership_number,email,phone
 ```
 
-For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email, phone, and membership number may be blank; missing numbers are generated. Duplicate membership numbers, email addresses, and matching names in the same member type and class are skipped and reported, both within the CSV and against existing members. Phone and email values are stored for directory use. Imports accept up to 5,000 rows per file.
+For students, set `member_type` to `Student` and `class_section` to one of `S1A`, `S1B`, `S1C`, `S1D`, `S1E`, `S1F`, `S2A`, `S2B`, `S2C`, `S2D`, `S3A`, `S3B`, `S3C`, `S3D`, `S4LANG`, `S4ARTS`, `S4MS2`, `S5LANG`, `S5ARTS`, `S5MS2`, `S6LFK`, `S6HGL`, or `S6MCE`. For teachers, set `member_type` to `Teacher` and leave `class_section` blank. Email, phone, and membership number may be blank; missing numbers are generated. A member can have one email address, and each email address can belong to only one member. Duplicate membership numbers, email addresses, and matching names in the same member type and class are skipped and reported, both within the CSV and against existing members. Phone and email values are stored for directory use. Imports accept up to 5,000 rows per file.
+
+After a checkout succeeds, choose **Email checkout copy to member** to open a prefilled message listing the titles and quantities from that checkout and their due date. The message opens in your device's configured email app for you to review and send; the app does not send emails automatically. A member must have an email address saved to use this option.
 
 ### WhatsApp return reminders
 
