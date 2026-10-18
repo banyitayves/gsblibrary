@@ -96,17 +96,17 @@ function groupReminderRecipients(members, loans, includeLoan) {
     .sort((left, right) => left.name.localeCompare(right.name))
 }
 function checkoutReceiptMessage({ memberName, loans, dueDate }) {
-  return `Hello ${memberName},\n\nHere is a copy of the books checked out to you:\n${loans.map((loan) => `- ${loan.bookTitle}: ${loan.quantity} ${Number(loan.quantity) === 1 ? 'copy' : 'copies'}`).join('\n')}\n\nDue date: ${dueDate}\n\nPlease return the books by the due date. Thank you!\n\nGS Busanza Library`
+  return `Hello ${memberName},\n\nHere is a copy of the books checked out to you:\n${loans.map((loan) => `- ${loan.bookTitle} (Grade ${loan.grade || 'not recorded'}): ${loan.quantity} ${Number(loan.quantity) === 1 ? 'copy' : 'copies'}`).join('\n')}\n\nDue date: ${dueDate}\n\nPlease return the books by the due date. Thank you!\n\nGS Busanza Library`
 }
 function gmailComposeUrl(to, subject, body) {
   const parameters = new URLSearchParams({ view: 'cm', fs: '1', to, su: subject, body })
   return `https://mail.google.com/mail/?${parameters.toString()}`
 }
-function returnSummaryMessage({ memberName, bookTitle, returnedThisTime, missingThisTime, outstandingQuantity, outstandingLoans, totalOutstanding, totalReturned, totalMissing }) {
+function returnSummaryMessage({ memberName, bookTitle, bookGrade, returnedThisTime, missingThisTime, outstandingQuantity, outstandingLoans, totalOutstanding, totalReturned, totalMissing }) {
   const outstandingLines = outstandingLoans.length
-    ? outstandingLoans.map((loan) => `- ${loan.bookTitle}: ${loan.outstandingQuantity} ${Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'} (due ${loan.dueDate})`).join('\n')
+    ? outstandingLoans.map((loan) => `- ${loan.bookTitle} (Grade ${loan.grade || 'not recorded'}): ${loan.outstandingQuantity} ${Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'} (due ${loan.dueDate})`).join('\n')
     : 'None'
-  return `Hello ${memberName},\n\nGS Busanza Library return update for "${bookTitle}":\n- Returned now: ${returnedThisTime}\n- Missing now: ${missingThisTime}\n- Still outstanding for this title: ${outstandingQuantity}\n- Total returned: ${totalReturned}\n- Total missing: ${totalMissing}\n\nAll books still outstanding (${totalOutstanding} ${totalOutstanding === 1 ? 'copy' : 'copies'}):\n${outstandingLines}\n\nThank you!`
+  return `Hello ${memberName},\n\nGS Busanza Library return update for "${bookTitle}" (Grade ${bookGrade || 'not recorded'}):\n- Returned now: ${returnedThisTime}\n- Missing now: ${missingThisTime}\n- Still outstanding for this title: ${outstandingQuantity}\n- Total returned: ${totalReturned}\n- Total missing: ${totalMissing}\n\nAll books still outstanding (${totalOutstanding} ${totalOutstanding === 1 ? 'copy' : 'copies'}):\n${outstandingLines}\n\nThank you!`
 }
 const memberCsvHeaders = 'name,member_type,class_section,membership_number,email,phone'
 const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,publication_year,grade,shelf_location,category'
@@ -455,6 +455,7 @@ function App() {
         method: 'POST',
         body: JSON.stringify({ memberId: Number(loanForm.memberId), dueDate: loanForm.dueDate, items }),
       })
+      const checkoutBooks = new Map(books.map((book) => [Number(book.id), book]))
       setModal({
         type: 'checkoutComplete',
         memberName: selectedLoanMember.name,
@@ -462,7 +463,10 @@ function App() {
         email: selectedLoanMember.email,
         phone: selectedLoanMember.phone,
         dueDate: loanForm.dueDate,
-        loans: checkout.loans,
+        loans: checkout.loans.map((loan) => ({
+          ...loan,
+          grade: checkoutBooks.get(Number(loan.bookId))?.grade || '',
+        })),
       })
       setLoanForm(initialLoanForm())
       notify(`${selectedLoanQuantity} ${selectedLoanQuantity === 1 ? 'copy' : 'copies'} checked out successfully.`)
@@ -498,10 +502,12 @@ function App() {
         method: 'POST',
         body: JSON.stringify({ returnedQuantity, missedQuantity }),
       })
+      const catalogById = new Map(books.map((book) => [Number(book.id), book]))
       const outstandingLoans = loans
         .filter((memberLoan) => Number(memberLoan.memberId) === Number(loan.memberId))
         .map((memberLoan) => ({
           ...memberLoan,
+          grade: catalogById.get(Number(memberLoan.bookId))?.grade || '',
           outstandingQuantity: Number(memberLoan.id) === Number(loan.id)
             ? Number(result.outstandingQuantity)
             : Number(memberLoan.outstandingQuantity),
@@ -515,6 +521,7 @@ function App() {
         email: modal.member?.email || '',
         phone: modal.member?.phone || '',
         bookTitle: loan.bookTitle,
+        bookGrade: catalogById.get(Number(loan.bookId))?.grade || '',
         returnedThisTime: returnedQuantity,
         missingThisTime: missedQuantity,
         outstandingQuantity: result.outstandingQuantity,
@@ -1147,7 +1154,7 @@ function App() {
           <div className="space-y-4">
             <div className="rounded-xl bg-[#f7f8f5] p-4 text-[11px] leading-relaxed text-[#748078]">
               <p className="font-bold text-[#46584b]">{modal.memberName}</p>
-              <p className="mt-1">{modal.membershipNumber} · {modal.bookTitle}</p>
+              <p className="mt-1">{modal.membershipNumber} · {modal.bookTitle} · Grade {modal.bookGrade || 'not recorded'}</p>
               <ul className="mt-3 space-y-1">
                 <li>Returned now: {modal.returnedThisTime}</li>
                 <li>Missing now: {modal.missingThisTime}</li>
@@ -1158,7 +1165,7 @@ function App() {
               {modal.outstandingLoans.length > 0 ? (
                 <ul className="mt-1 space-y-1">
                   {modal.outstandingLoans.map((loan) => (
-                    <li key={loan.id}>{loan.bookTitle} · {loan.outstandingQuantity} {Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'} · due {loan.dueDate}</li>
+                    <li key={loan.id}>{loan.bookTitle} · Grade {loan.grade || 'not recorded'} · {loan.outstandingQuantity} {Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'} · due {loan.dueDate}</li>
                   ))}
                 </ul>
               ) : <p className="mt-1">None</p>}
@@ -1207,7 +1214,7 @@ function App() {
               <p className="mt-1">{modal.membershipNumber}{modal.email ? ` · ${modal.email}` : ''}</p>
               <ul className="mt-3 space-y-1.5">
                 {modal.loans.map((loan) => (
-                  <li key={loan.id}>{loan.bookTitle} · {loan.quantity} {Number(loan.quantity) === 1 ? 'copy' : 'copies'} · due {modal.dueDate}</li>
+                  <li key={loan.id}>{loan.bookTitle} · Grade {loan.grade || 'not recorded'} · {loan.quantity} {Number(loan.quantity) === 1 ? 'copy' : 'copies'} · due {modal.dueDate}</li>
                 ))}
               </ul>
             </div>
