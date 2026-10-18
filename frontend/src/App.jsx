@@ -1245,8 +1245,8 @@ function App() {
 
       {modal?.type === 'reminders' && (
         <Modal
-          title="WhatsApp return reminders"
-          subtitle="Only borrowers with books due today or overdue are listed. Chats open one at a time for you to review and send."
+          title="Return reminders"
+          subtitle="Borrowers with books due today or overdue can receive a prepared Gmail or WhatsApp reminder."
           onClose={() => setModal(null)}
         >
           {dueReminderRecipients.length === 0 ? (
@@ -1261,6 +1261,7 @@ function App() {
                   })
                   .join('\n')
                 const message = `Hello ${recipient.name}, this is a friendly reminder from GS Busanza Library. Please return these book${recipient.loans.length === 1 ? '' : 's'}:\n${reminderLines}\n\nThank you!`
+                const emailMessage = `Hello ${recipient.name},\n\nThis is a friendly reminder from GS Busanza Library to return these books:\n${reminderLines}\n\nThank you!`
                 const chatUrl = recipient.messagingNumber
                   ? `https://wa.me/${recipient.messagingNumber}?text=${encodeURIComponent(message)}`
                   : ''
@@ -1269,12 +1270,14 @@ function App() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-[11px] font-bold text-[#46584b]">{recipient.name}</p>
-                        <p className="mt-1 text-[10px] text-[#8a958d]">{recipient.phone || 'No phone number saved'}</p>
+                        <p className="mt-1 text-[10px] text-[#8a958d]">{recipient.email || 'No email saved'} · {recipient.phone || 'No phone number saved'}</p>
                       </div>
-                      {chatUrl
-                        ? <a href={chatUrl} target="_blank" rel="noopener noreferrer" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#e8f4eb] px-3 py-2 text-[10px] font-bold text-[#28644b] hover:bg-[#dceee1]"><MessageCircle size={13} /> Open WhatsApp</a>
-                        : <span className="shrink-0 rounded-lg bg-[#f7f8f5] px-3 py-2 text-[10px] font-semibold text-[#929d94]">Add international phone</span>}
+                      <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                        {recipient.email && <a href={gmailComposeUrl(recipient.email, 'GS Busanza Library book return reminder', emailMessage)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-[#f8eee9] px-3 py-2 text-[10px] font-bold text-[#8c5945] hover:bg-[#f3e4de]">Open Gmail</a>}
+                        {chatUrl && <a href={chatUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-[#e8f4eb] px-3 py-2 text-[10px] font-bold text-[#28644b] hover:bg-[#dceee1]"><MessageCircle size={13} /> Open WhatsApp</a>}
+                      </div>
                     </div>
+                    {!recipient.email && !chatUrl && <p className="mt-2 text-[10px] text-[#929d94]">Add an email address or valid international phone number to prepare a reminder.</p>}
                     <p className="mt-2 whitespace-pre-line text-[10px] leading-relaxed text-[#748078]">{reminderLines}</p>
                   </article>
                 )
@@ -1299,6 +1302,7 @@ function App() {
                   .map((loan) => `• ${loan.bookTitle} (${loan.outstandingQuantity} ${Number(loan.outstandingQuantity) === 1 ? 'copy' : 'copies'})`)
                   .join('\n')
                 const message = `Hello ${recipient.name}, this is a friendly reminder from GS Busanza Library that these books are due tomorrow (${dateInDays(1)}):\n${reminderLines}\nPlease return them on time. Thank you!`
+                const emailMessage = `Hello ${recipient.name},\n\nThis is a friendly reminder from GS Busanza Library that these books are due tomorrow (${dateInDays(1)}):\n${reminderLines}\n\nPlease return them on time. Thank you!`
                 const smsUrl = recipient.messagingNumber
                   ? `sms:+${recipient.messagingNumber}?body=${encodeURIComponent(message)}`
                   : ''
@@ -1307,19 +1311,21 @@ function App() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-[11px] font-bold text-[#46584b]">{recipient.name}</p>
-                        <p className="mt-1 text-[10px] text-[#8a958d]">{recipient.phone || 'No phone number saved'}</p>
+                        <p className="mt-1 text-[10px] text-[#8a958d]">{recipient.email || 'No email saved'} · {recipient.phone || 'No phone number saved'}</p>
                       </div>
-                      {smsUrl
-                        ? <a href={smsUrl} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#28644b] hover:bg-[#dceee1]"><MessageSquareText size={13} /> Prepare SMS</a>
-                        : <span className="shrink-0 rounded-lg bg-[#f7f8f5] px-3 py-2 text-[10px] font-semibold text-[#929d94]">Add international phone</span>}
+                      <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                        {recipient.email && <a href={gmailComposeUrl(recipient.email, 'GS Busanza Library reminder: books due tomorrow', emailMessage)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-[#f8eee9] px-3 py-2 text-[10px] font-bold text-[#8c5945] hover:bg-[#f3e4de]">Open Gmail</a>}
+                        {smsUrl && <a href={smsUrl} className="inline-flex items-center gap-1.5 rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#28644b] hover:bg-[#dceee1]"><MessageSquareText size={13} /> Prepare SMS</a>}
+                      </div>
                     </div>
+                    {!recipient.email && !smsUrl && <p className="mt-2 text-[10px] text-[#929d94]">Add an email address or valid international phone number to prepare a reminder.</p>}
                     <p className="mt-2 whitespace-pre-line text-[10px] leading-relaxed text-[#748078]">{reminderLines}</p>
                   </article>
                 )
               })}
             </div>
           )}
-          <p className="mt-4 text-center text-[10px] text-[#929d94]">Your device opens a prepared message. Review and send each SMS yourself; carrier charges may apply.</p>
+          <p className="mt-4 text-center text-[10px] text-[#929d94]">Gmail opens in a new tab; review and press Send. Review and send each SMS yourself; carrier charges may apply.</p>
         </Modal>
       )}
 

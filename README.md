@@ -107,7 +107,7 @@ This changes the single librarian account's username and bcrypt password without
 - Optional single email address per member and manually prepared checkout and return summaries by email or WhatsApp
 - Name, membership-number, class, and member-type search and filters
 - Book checkout with an optional physical copy/accession code, multi-title quantity checkout for teachers (up to 300 active copies), a one-book student limit, returned/missing copy reconciliation, and overdue tracking
-- Manual, personalized WhatsApp return reminders for borrowers whose books are due today or overdue
+- Manual Gmail and WhatsApp return reminders for borrowers whose books are due today or overdue
 - Prepared, manual SMS reminders for borrowers with books due tomorrow
 - Daily library attendance for students and teachers, optional reading-book records, frequent-visitor rankings, and date-based CSV export
 - Borrower counts and filtered circulation/class reports
@@ -126,11 +126,11 @@ For students, set `member_type` to `Student` and `class_section` to one of `S1A`
 
 After a checkout succeeds, choose **Open Gmail: checkout copy** or **WhatsApp checkout copy** to open a prefilled message listing the titles and quantities from that checkout and their due date. After recording a return, choose **Open Gmail: return summary** or **WhatsApp return summary** to share the copies returned, missing, and all titles and quantities the member still has outstanding, plus totals to date. Gmail opens in a new browser tab with the recipient, subject, and message filled in; sign in to Gmail if prompted and press **Send**. The app does not send messages automatically. Members need a saved email address and/or a valid phone number for the corresponding option.
 
-### WhatsApp return reminders
+### Return reminders
 
-In **Loans & returns**, choose **WhatsApp reminders** to see borrowers with books due today or overdue. The list groups outstanding titles by member and prepares a personalized reminder in WhatsApp when you open a chat. Review and send each message yourself; the app does not send messages automatically. Members need a usable phone number. International numbers should include their country code (for example, `+250...`); 10-digit Rwandan numbers beginning with `0` are also supported.
+In **Loans & returns**, choose **WhatsApp reminders** to see borrowers with books due today or overdue. The list groups outstanding titles by member and prepares a personalized message for Gmail and/or WhatsApp. Gmail opens a compose window in a new tab; review and press **Send**. WhatsApp opens a chat for you to review and send. The app does not send messages automatically. Members need a saved email address and/or a usable phone number. International numbers should include their country code (for example, `+250...`); 10-digit Rwandan numbers beginning with `0` are also supported.
 
-Choose **SMS due tomorrow** to prepare a text message for each borrower with an outstanding book due the following day. Open each message in your device's SMS app and send it yourself; automatic SMS is not used, and your carrier may charge for texts. Members need a phone number in international format or a 10-digit Rwandan number beginning with `0`.
+Choose **SMS due tomorrow** to prepare a Gmail reminder and/or a text message for each borrower with an outstanding book due the following day. Gmail opens a prefilled compose window; SMS opens in your device's messaging app. Review and send messages yourself; automatic messaging is not used, and your carrier may charge for texts. Members need a saved email address and/or a phone number in international format or a 10-digit Rwandan number beginning with `0`.
 
 ### Separate reports
 
