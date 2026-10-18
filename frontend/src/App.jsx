@@ -95,6 +95,12 @@ function groupReminderRecipients(members, loans, includeLoan) {
     .map((recipient) => ({ ...recipient, messagingNumber: whatsappNumber(recipient.phone) }))
     .sort((left, right) => left.name.localeCompare(right.name))
 }
+function checkoutReceiptMessage({ memberName, loans, dueDate }) {
+  return `Hello ${memberName},\n\nHere is a copy of the books checked out to you:\n${loans.map((loan) => `- ${loan.bookTitle}: ${loan.quantity} ${Number(loan.quantity) === 1 ? 'copy' : 'copies'}`).join('\n')}\n\nDue date: ${dueDate}\n\nPlease return the books by the due date. Thank you!\n\nGS Busanza Library`
+}
+function returnSummaryMessage({ memberName, bookTitle, returnedThisTime, missingThisTime, outstandingQuantity, totalReturned, totalMissing }) {
+  return `Hello ${memberName},\n\nGS Busanza Library return update for "${bookTitle}":\n- Returned now: ${returnedThisTime}\n- Missing now: ${missingThisTime}\n- Still outstanding: ${outstandingQuantity}\n- Total returned: ${totalReturned}\n- Total missing: ${totalMissing}\n\nThank you!`
+}
 const memberCsvHeaders = 'name,member_type,class_section,membership_number,email,phone'
 const bookCsvHeaders = 'title,isbn,publisher,author,total_copies,date_delivered,publication_year,grade,shelf_location,category'
 const reportDefinitions = {
@@ -447,6 +453,7 @@ function App() {
         memberName: selectedLoanMember.name,
         membershipNumber: selectedLoanMember.membershipNumber,
         email: selectedLoanMember.email,
+        phone: selectedLoanMember.phone,
         dueDate: loanForm.dueDate,
         loans: checkout.loans,
       })
@@ -462,7 +469,8 @@ function App() {
 
   function openLoanAction(action, loan) {
     setLoanActionQuantities(action === 'return' ? { returned: '1', missed: '0' } : { returned: '0', missed: '1' })
-    setModal({ type: 'loanAction', action, loan })
+    const member = members.find((item) => Number(item.id) === Number(loan.memberId))
+    setModal({ type: 'loanAction', action, loan, member })
   }
 
   async function saveLoanAction(event) {
@@ -483,7 +491,19 @@ function App() {
         method: 'POST',
         body: JSON.stringify({ returnedQuantity, missedQuantity }),
       })
-      setModal(null)
+      setModal({
+        type: 'returnComplete',
+        memberName: loan.memberName,
+        membershipNumber: loan.membershipNumber,
+        email: modal.member?.email || '',
+        phone: modal.member?.phone || '',
+        bookTitle: loan.bookTitle,
+        returnedThisTime: returnedQuantity,
+        missingThisTime: missedQuantity,
+        outstandingQuantity: result.outstandingQuantity,
+        totalReturned: result.returnedQuantity,
+        totalMissing: result.missedQuantity,
+      })
       notify(`${returnedQuantity} returned, ${missedQuantity} missing; ${result.outstandingQuantity} still outstanding for “${loan.bookTitle}”.`)
       await loadData()
     } catch (error) {
@@ -1099,10 +1119,57 @@ function App() {
         </Modal>
       )}
 
+      {modal?.type === 'returnComplete' && (
+        <Modal
+          title="Return details recorded"
+          subtitle="Send the member a summary of what was returned, what is missing, and what remains."
+          onClose={() => setModal(null)}
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl bg-[#f7f8f5] p-4 text-[11px] leading-relaxed text-[#748078]">
+              <p className="font-bold text-[#46584b]">{modal.memberName}</p>
+              <p className="mt-1">{modal.membershipNumber} · {modal.bookTitle}</p>
+              <ul className="mt-3 space-y-1">
+                <li>Returned now: {modal.returnedThisTime}</li>
+                <li>Missing now: {modal.missingThisTime}</li>
+                <li>Still outstanding: {modal.outstandingQuantity}</li>
+                <li>Total returned: {modal.totalReturned} · Total missing: {modal.totalMissing}</li>
+              </ul>
+            </div>
+            {modal.email || whatsappNumber(modal.phone) ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {modal.email && (
+                  <a
+                    href={`mailto:${encodeURIComponent(modal.email)}?subject=${encodeURIComponent('GS Busanza Library return update')}&body=${encodeURIComponent(returnSummaryMessage(modal))}`}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3 text-[11px] font-bold text-white hover:bg-[#284a39]"
+                  >
+                    Email return summary
+                  </a>
+                )}
+                {whatsappNumber(modal.phone) && (
+                  <a
+                    href={`https://wa.me/${whatsappNumber(modal.phone)}?text=${encodeURIComponent(returnSummaryMessage(modal))}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#e8f4eb] px-4 py-3 text-[11px] font-bold text-[#28644b] hover:bg-[#dceee1]"
+                  >
+                    <MessageCircle size={14} /> WhatsApp return summary
+                  </a>
+                )}
+              </div>
+            ) : (
+              <p className="rounded-lg bg-[#f7f8f5] px-3 py-2 text-[11px] text-[#748078]">This member has no saved email address or valid WhatsApp number. Add contact details to their member profile to prepare a message.</p>
+            )}
+            <button type="button" onClick={() => setModal(null)} className="w-full rounded-xl border border-[#e8ece6] px-4 py-2.5 text-[11px] font-bold text-[#738077] hover:bg-[#f7f8f5]">Done</button>
+            <p className="text-center text-[10px] text-[#929d94]">Messages open in your email or WhatsApp app for you to review and send.</p>
+          </div>
+        </Modal>
+      )}
+
       {modal?.type === 'checkoutComplete' && (
         <Modal
           title="Checkout complete"
-          subtitle="Review the borrowed-book summary and email a copy to the member."
+          subtitle="Send the member a copy of the books borrowed in this checkout."
           onClose={() => setModal(null)}
         >
           <div className="space-y-4">
@@ -1115,18 +1182,32 @@ function App() {
                 ))}
               </ul>
             </div>
-            {modal.email ? (
-              <a
-                href={`mailto:${encodeURIComponent(modal.email)}?subject=${encodeURIComponent('GS Busanza Library checkout receipt')}&body=${encodeURIComponent(`Hello ${modal.memberName},\n\nHere is a copy of the books checked out to you:\n${modal.loans.map((loan) => `- ${loan.bookTitle}: ${loan.quantity} ${Number(loan.quantity) === 1 ? 'copy' : 'copies'}`).join('\n')}\n\nDue date: ${modal.dueDate}\n\nPlease return the books by the due date. Thank you!\n\nGS Busanza Library`)}`}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3 text-[11px] font-bold text-white hover:bg-[#284a39]"
-              >
-                Email checkout copy to member
-              </a>
+            {modal.email || whatsappNumber(modal.phone) ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {modal.email && (
+                  <a
+                    href={`mailto:${encodeURIComponent(modal.email)}?subject=${encodeURIComponent('GS Busanza Library checkout receipt')}&body=${encodeURIComponent(checkoutReceiptMessage(modal))}`}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#315c46] px-4 py-3 text-[11px] font-bold text-white hover:bg-[#284a39]"
+                  >
+                    Email checkout copy
+                  </a>
+                )}
+                {whatsappNumber(modal.phone) && (
+                  <a
+                    href={`https://wa.me/${whatsappNumber(modal.phone)}?text=${encodeURIComponent(checkoutReceiptMessage(modal))}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#e8f4eb] px-4 py-3 text-[11px] font-bold text-[#28644b] hover:bg-[#dceee1]"
+                  >
+                    <MessageCircle size={14} /> WhatsApp checkout copy
+                  </a>
+                )}
+              </div>
             ) : (
-              <p className="rounded-lg bg-[#f7f8f5] px-3 py-2 text-[11px] text-[#748078]">This member has no email address saved. Add one to their member profile to prepare checkout emails.</p>
+              <p className="rounded-lg bg-[#f7f8f5] px-3 py-2 text-[11px] text-[#748078]">This member has no saved email address or valid WhatsApp number. Add contact details to their member profile to prepare a message.</p>
             )}
             <button type="button" onClick={() => setModal(null)} className="w-full rounded-xl border border-[#e8ece6] px-4 py-2.5 text-[11px] font-bold text-[#738077] hover:bg-[#f7f8f5]">Done</button>
-            <p className="text-center text-[10px] text-[#929d94]">Your email app opens with the message ready; review and send it yourself.</p>
+            <p className="text-center text-[10px] text-[#929d94]">Messages open in your email or WhatsApp app for you to review and send.</p>
           </div>
         </Modal>
       )}
