@@ -1,4 +1,5 @@
 from io import BytesIO
+from uuid import uuid4
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -32,12 +33,12 @@ users = [
 ]
 
 books = [
-    {"id": "BK-1024", "title": "The Pragmatic Programmer", "author": "Andrew Hunt", "category": "Technology", "status": "Available", "location": "A1-12", "copies": 3, "borrowed": 0},
-    {"id": "BK-2048", "title": "Atomic Habits", "author": "James Clear", "category": "Self Improvement", "status": "Checked Out", "location": "B4-02", "copies": 2, "borrowed": 1},
-    {"id": "BK-3410", "title": "The Alchemist", "author": "Paulo Coelho", "category": "Fiction", "status": "Available", "location": "C3-09", "copies": 4, "borrowed": 0},
-    {"id": "BK-4411", "title": "Clean Code", "author": "Robert C. Martin", "category": "Technology", "status": "Overdue", "location": "A2-07", "copies": 2, "borrowed": 1},
-    {"id": "BK-5120", "title": "Deep Work", "author": "Cal Newport", "category": "Productivity", "status": "Available", "location": "D1-05", "copies": 5, "borrowed": 0},
-    {"id": "BK-6177", "title": "The Silent Patient", "author": "Alex Michaelides", "category": "Mystery", "status": "Reserved", "location": "B2-14", "copies": 3, "borrowed": 2},
+    {"id": "BK-1024", "code": "BK-1024", "title": "The Pragmatic Programmer", "author": "Andrew Hunt", "category": "Technology", "status": "Available", "location": "A1-12", "copies": 3, "borrowed": 0},
+    {"id": "BK-2048", "code": "BK-2048", "title": "Atomic Habits", "author": "James Clear", "category": "Self Improvement", "status": "Checked Out", "location": "B4-02", "copies": 2, "borrowed": 1},
+    {"id": "BK-3410", "code": "BK-3410", "title": "The Alchemist", "author": "Paulo Coelho", "category": "Fiction", "status": "Available", "location": "C3-09", "copies": 4, "borrowed": 0},
+    {"id": "BK-4411", "code": "BK-4411", "title": "Clean Code", "author": "Robert C. Martin", "category": "Technology", "status": "Overdue", "location": "A2-07", "copies": 2, "borrowed": 1},
+    {"id": "BK-5120", "code": "BK-5120", "title": "Deep Work", "author": "Cal Newport", "category": "Productivity", "status": "Available", "location": "D1-05", "copies": 5, "borrowed": 0},
+    {"id": "BK-6177", "code": "BK-6177", "title": "The Silent Patient", "author": "Alex Michaelides", "category": "Mystery", "status": "Reserved", "location": "B2-14", "copies": 3, "borrowed": 2},
 ]
 
 loans = [
@@ -103,6 +104,60 @@ def dashboard():
 @app.get("/api/books")
 def get_books():
     return books
+
+
+def normalize_book_value(value):
+    return " ".join(str(value or "").split()).casefold()
+
+
+@app.post("/api/books", status_code=201)
+def create_book(payload: dict):
+    code = str(payload.get("code") or "").strip()
+    title = str(payload.get("title") or "").strip()
+    grade = str(payload.get("grade") or "").strip()
+    book_type = str(payload.get("type") or "").strip()
+
+    if not code or not title or not grade or not book_type:
+        raise HTTPException(
+            status_code=400,
+            detail="Physical code, title, grade, and book type are required.",
+        )
+
+    identity = (
+        normalize_book_value(title),
+        normalize_book_value(grade),
+        normalize_book_value(book_type),
+    )
+    duplicate = any(
+        normalize_book_value(book.get("code") or book["id"]) == normalize_book_value(code)
+        and (
+            normalize_book_value(book.get("title")),
+            normalize_book_value(book.get("grade")),
+            normalize_book_value(book.get("type")),
+        ) == identity
+        for book in books
+    )
+    if duplicate:
+        raise HTTPException(
+            status_code=409,
+            detail="This physical code is already used by the same title, grade, and book type.",
+        )
+
+    book = {
+        "id": f"BK-{uuid4().hex}",
+        "code": code,
+        "title": title,
+        "author": str(payload.get("author") or "Unknown author").strip(),
+        "grade": grade,
+        "type": book_type,
+        "category": str(payload.get("category") or "General").strip(),
+        "status": "Available",
+        "location": str(payload.get("location") or "New shelf").strip(),
+        "copies": 1,
+        "borrowed": 0,
+    }
+    books.append(book)
+    return book
 
 
 @app.get("/api/users")

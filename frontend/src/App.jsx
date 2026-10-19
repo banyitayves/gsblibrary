@@ -29,13 +29,32 @@ const defaultUsers = [
 ]
 
 const defaultBooks = [
-  { id: 'BK-1024', title: 'The Pragmatic Programmer', author: 'Andrew Hunt', category: 'Technology', status: 'Available', location: 'A1-12' },
-  { id: 'BK-2048', title: 'Atomic Habits', author: 'James Clear', category: 'Self Improvement', status: 'Checked Out', location: 'B4-02' },
-  { id: 'BK-3410', title: 'The Alchemist', author: 'Paulo Coelho', category: 'Fiction', status: 'Available', location: 'C3-09' },
-  { id: 'BK-4411', title: 'Clean Code', author: 'Robert C. Martin', category: 'Technology', status: 'Overdue', location: 'A2-07' },
-  { id: 'BK-5120', title: 'Deep Work', author: 'Cal Newport', category: 'Productivity', status: 'Available', location: 'D1-05' },
-  { id: 'BK-6177', title: 'The Silent Patient', author: 'Alex Michaelides', category: 'Mystery', status: 'Reserved', location: 'B2-14' },
+  { id: 'BK-1024', code: 'BK-1024', title: 'The Pragmatic Programmer', author: 'Andrew Hunt', category: 'Technology', status: 'Available', location: 'A1-12' },
+  { id: 'BK-2048', code: 'BK-2048', title: 'Atomic Habits', author: 'James Clear', category: 'Self Improvement', status: 'Checked Out', location: 'B4-02' },
+  { id: 'BK-3410', code: 'BK-3410', title: 'The Alchemist', author: 'Paulo Coelho', category: 'Fiction', status: 'Available', location: 'C3-09' },
+  { id: 'BK-4411', code: 'BK-4411', title: 'Clean Code', author: 'Robert C. Martin', category: 'Technology', status: 'Overdue', location: 'A2-07' },
+  { id: 'BK-5120', code: 'BK-5120', title: 'Deep Work', author: 'Cal Newport', category: 'Productivity', status: 'Available', location: 'D1-05' },
+  { id: 'BK-6177', code: 'BK-6177', title: 'The Silent Patient', author: 'Alex Michaelides', category: 'Mystery', status: 'Reserved', location: 'B2-14' },
 ]
+
+const emptyBookForm = {
+  code: '',
+  title: '',
+  author: '',
+  grade: '',
+  type: '',
+  category: '',
+  location: '',
+}
+
+const normalizeBookValue = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+
+const hasSameBookIdentity = (book, candidate) => (
+  normalizeBookValue(book.code || book.id) === normalizeBookValue(candidate.code)
+  && normalizeBookValue(book.title) === normalizeBookValue(candidate.title)
+  && normalizeBookValue(book.grade) === normalizeBookValue(candidate.grade)
+  && normalizeBookValue(book.type) === normalizeBookValue(candidate.type)
+)
 
 const defaultLoans = [
   { id: 'L-1001', bookId: 'BK-2048', member: 'Maya Clark', dueDate: '2026-10-20', status: 'Borrowed' },
@@ -93,6 +112,7 @@ function App() {
   const [loginForm, setLoginForm] = useState({ username: 'admin', password: 'admin123' })
   const [loanForm, setLoanForm] = useState({ member: 'Maya Clark', bookId: 'BK-1024', dueDate: '2026-10-20' })
   const [readingForm, setReadingForm] = useState({ student: 'Maya Clark', bookId: 'BK-5120', minutes: '60', date: '2026-10-14' })
+  const [bookForm, setBookForm] = useState(emptyBookForm)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -128,7 +148,7 @@ function App() {
 
   const filteredBooks = useMemo(() => {
     return books.filter((book) => {
-      const matchesSearch = [book.title, book.author, book.id, book.category]
+      const matchesSearch = [book.title, book.author, book.code || book.id, book.category, book.grade, book.type]
         .join(' ')
         .toLowerCase()
         .includes(search.toLowerCase())
@@ -137,6 +157,28 @@ function App() {
       return matchesSearch && matchesStatus
     })
   }, [books, search, statusFilter])
+
+  const handleAddBook = async (event) => {
+    event.preventDefault()
+    if (books.some((book) => hasSameBookIdentity(book, bookForm))) {
+      alert('This physical code is already used by the same title, grade, and book type.')
+      return
+    }
+
+    try {
+      const response = await fetch('/api/books', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bookForm),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || 'Unable to add this book.')
+      setBooks((currentBooks) => [...currentBooks, result])
+      setBookForm(emptyBookForm)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to add this book. Please check the backend connection.')
+    }
+  }
 
   const handleLogin = (event) => {
     event.preventDefault()
@@ -245,14 +287,30 @@ function App() {
       const result = await response.json()
       if (kind === 'books') {
         const records = result.preview || []
-        setBooks((currentBooks) => [...currentBooks, ...records.map((record) => ({
-          id: record.id || `BK-${Date.now()}`,
+        const importedBooks = records.map((record, index) => ({
+          id: `BK-IMPORT-${Date.now()}-${index}`,
+          code: record.code || record.physicalCode || record.id || `Imported-${Date.now()}-${index}`,
           title: record.title || 'Imported Book',
           author: record.author || 'Unknown author',
+          grade: record.grade || '',
+          type: record.type || record.bookType || '',
           category: record.category || 'General',
           status: record.status || 'Available',
           location: record.location || 'New shelf',
-        }))])
+        }))
+        const acceptedBooks = []
+        let duplicatesSkipped = 0
+        for (const book of importedBooks) {
+          if ([...books, ...acceptedBooks].some((existingBook) => hasSameBookIdentity(existingBook, book))) {
+            duplicatesSkipped += 1
+          } else {
+            acceptedBooks.push(book)
+          }
+        }
+        setBooks((currentBooks) => [...currentBooks, ...acceptedBooks])
+        if (duplicatesSkipped > 0) {
+          alert(`${duplicatesSkipped} imported book${duplicatesSkipped === 1 ? '' : 's'} skipped because the physical code, title, grade, and type already exist.`)
+        }
       }
 
       if (kind === 'users') {
@@ -422,9 +480,72 @@ function App() {
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Catalog</p>
-                <h2>Search and filter books</h2>
+                <h2>Catalog books</h2>
               </div>
             </div>
+
+            <form className="catalog-add-form" onSubmit={handleAddBook}>
+              <h3>Add a book</h3>
+              <div className="catalog-fields">
+                <label>
+                  Physical code
+                  <input
+                    required
+                    value={bookForm.code}
+                    onChange={(event) => setBookForm({ ...bookForm, code: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Title
+                  <input
+                    required
+                    value={bookForm.title}
+                    onChange={(event) => setBookForm({ ...bookForm, title: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Grade
+                  <input
+                    required
+                    placeholder="e.g. S3"
+                    value={bookForm.grade}
+                    onChange={(event) => setBookForm({ ...bookForm, grade: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Book type
+                  <input
+                    required
+                    placeholder="e.g. Student book"
+                    value={bookForm.type}
+                    onChange={(event) => setBookForm({ ...bookForm, type: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Author
+                  <input
+                    value={bookForm.author}
+                    onChange={(event) => setBookForm({ ...bookForm, author: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Category
+                  <input
+                    value={bookForm.category}
+                    onChange={(event) => setBookForm({ ...bookForm, category: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Location
+                  <input
+                    value={bookForm.location}
+                    onChange={(event) => setBookForm({ ...bookForm, location: event.target.value })}
+                  />
+                </label>
+              </div>
+              <button className="primary" type="submit">Add book</button>
+              <p className="form-hint">A physical code can be reused for a different title, grade, or book type.</p>
+            </form>
 
             <div className="toolbar-row">
               <input
@@ -447,8 +568,10 @@ function App() {
               <table>
                 <thead>
                   <tr>
-                    <th>ID</th>
+                    <th>Physical code</th>
                     <th>Title</th>
+                    <th>Grade</th>
+                    <th>Type</th>
                     <th>Category</th>
                     <th>Status</th>
                     <th>Location</th>
@@ -457,11 +580,13 @@ function App() {
                 <tbody>
                   {filteredBooks.map((book) => (
                     <tr key={book.id}>
-                      <td>{book.id}</td>
+                      <td>{book.code || book.id}</td>
                       <td>
                         <strong>{book.title}</strong>
                         <small>{book.author}</small>
                       </td>
+                      <td>{book.grade || '—'}</td>
+                      <td>{book.type || '—'}</td>
                       <td>{book.category}</td>
                       <td><span className={`status-pill ${book.status.toLowerCase().replace(/\s+/g, '-')}`}>{book.status}</span></td>
                       <td>{book.location}</td>
@@ -507,7 +632,7 @@ function App() {
             <form className="stack-form" onSubmit={handleLendBook}>
               <select value={loanForm.bookId} onChange={(event) => setLoanForm({ ...loanForm, bookId: event.target.value })}>
                 {books.map((book) => (
-                  <option key={book.id} value={book.id}>{book.title}</option>
+                  <option key={book.id} value={book.id}>{book.title} — {book.grade || 'No grade'} / {book.type || 'No type'} ({book.code || book.id})</option>
                 ))}
               </select>
               <input
@@ -560,7 +685,7 @@ function App() {
               />
               <select value={readingForm.bookId} onChange={(event) => setReadingForm({ ...readingForm, bookId: event.target.value })}>
                 {books.map((book) => (
-                  <option key={book.id} value={book.id}>{book.title}</option>
+                  <option key={book.id} value={book.id}>{book.title} — {book.grade || 'No grade'} / {book.type || 'No type'} ({book.code || book.id})</option>
                 ))}
               </select>
               <input
