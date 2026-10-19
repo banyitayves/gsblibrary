@@ -1597,6 +1597,74 @@ app.post('/api/loans/:id/missed', ...canManage, asyncRoute(async (req, res) => {
   }
 }))
 
+app.post('/api/loans/:id/recover', ...canManage, asyncRoute(async (req, res) => {
+  const quantity = Number(req.body.quantity)
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 300) {
+    return res.status(400).json({ error: 'Enter a recovered quantity from 1 to 300.' })
+  }
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[loan]] = await connection.execute(
+      `SELECT l.id, l.book_id AS bookId, l.quantity,
+       l.returned_quantity AS returnedQuantity, l.missed_quantity AS missedQuantity,
+       b.title, m.name AS memberName
+       FROM loans l JOIN books b ON b.id = l.book_id
+       JOIN members m ON m.id = l.member_id
+       WHERE l.id = ? FOR UPDATE`,
+      [req.params.id],
+    )
+    if (!loan) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Loan not found.' })
+    }
+    if (quantity > Number(loan.missedQuantity)) {
+      await connection.rollback()
+      return res.status(400).json({
+        error: `Only ${loan.missedQuantity} ${Number(loan.missedQuantity) === 1 ? 'copy was' : 'copies were'} marked missing on this checkout.`,
+      })
+    }
+    const [[book]] = await connection.execute(
+      'SELECT total_copies, available_copies FROM books WHERE id = ? FOR UPDATE',
+      [loan.bookId],
+    )
+    if (!book) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Book not found.' })
+    }
+    const returnedQuantity = Number(loan.returnedQuantity) + quantity
+    const missedQuantity = Number(loan.missedQuantity) - quantity
+    const complete = returnedQuantity + missedQuantity === Number(loan.quantity)
+    const returnedAt = complete && missedQuantity === 0 ? 'CURRENT_TIMESTAMP' : 'NULL'
+    await connection.execute(
+      `UPDATE loans SET returned_quantity = ?, missed_quantity = ?,
+       returned_at = ${returnedAt} WHERE id = ?`,
+      [returnedQuantity, missedQuantity, loan.id],
+    )
+    await connection.execute(
+      'UPDATE books SET total_copies = total_copies + ?, available_copies = available_copies + ? WHERE id = ?',
+      [quantity, quantity, loan.bookId],
+    )
+    await audit(
+      connection,
+      req.user.name,
+      'Book found',
+      `${quantity} ${loan.title} ${quantity === 1 ? 'copy' : 'copies'} previously marked missing ${quantity === 1 ? 'was' : 'were'} found and returned to available inventory from ${loan.memberName}`,
+    )
+    await connection.commit()
+    res.json({
+      message: `${quantity} ${quantity === 1 ? 'copy' : 'copies'} found and restored to the catalog.`,
+      returnedQuantity,
+      missedQuantity,
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}))
+
 app.post('/api/loans/:id/reconcile', ...canManage, asyncRoute(async (req, res) => {
   const returnedQuantityInput = Number(req.body.returnedQuantity)
   const missedQuantityInput = Number(req.body.missedQuantity)

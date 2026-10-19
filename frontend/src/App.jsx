@@ -201,6 +201,7 @@ function App() {
   const [memberForm, setMemberForm] = useState({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
   const [loanForm, setLoanForm] = useState(initialLoanForm)
   const [loanActionQuantities, setLoanActionQuantities] = useState({ returned: '1', missed: '0' })
+  const [recoveryQuantity, setRecoveryQuantity] = useState('1')
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const [loginMode, setLoginMode] = useState(() => new URLSearchParams(window.location.search).has('resetToken') ? 'reset' : 'signin')
   const [passwordResetToken, setPasswordResetToken] = useState(() => new URLSearchParams(window.location.search).get('resetToken') || '')
@@ -503,6 +504,30 @@ function App() {
     setLoanActionQuantities(action === 'return' ? { returned: '1', missed: '0' } : { returned: '0', missed: '1' })
     const member = members.find((item) => Number(item.id) === Number(loan.memberId))
     setModal({ type: 'loanAction', action, loan, member })
+  }
+
+  async function recoverLoan(event) {
+    event.preventDefault()
+    const { loan } = modal
+    const quantity = Number(recoveryQuantity)
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > Number(loan.missedQuantity)) {
+      notify(`Enter a quantity from 1 to ${loan.missedQuantity}.`)
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await api(`/loans/${loan.id}/recover`, {
+        method: 'POST',
+        body: JSON.stringify({ quantity }),
+      })
+      setModal(null)
+      notify(result.message)
+      await loadData()
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function saveLoanAction(event) {
@@ -960,6 +985,10 @@ function App() {
               onIssue={openLoanForm}
               onReturn={(loan) => openLoanAction('return', loan)}
               onMissed={(loan) => openLoanAction('missed', loan)}
+              onRecover={(loan) => {
+                setRecoveryQuantity('1')
+                setModal({ type: 'recoverLoan', loan })
+              }}
               reminders={dueReminderRecipients}
               onOpenReminders={() => setModal({ type: 'reminders' })}
               smsReminders={tomorrowSmsRecipients}
@@ -1179,6 +1208,28 @@ function App() {
               {Math.max(0, Number(modal.loan.outstandingQuantity) - (Number(loanActionQuantities.returned) || 0) - (Number(loanActionQuantities.missed) || 0))} copies will remain outstanding after this update.
             </p>
             <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Save return details" />
+          </form>
+        </Modal>
+      )}
+
+      {modal?.type === 'recoverLoan' && (
+        <Modal
+          title="Recover a found book"
+          subtitle="Restore the recovered copy to the catalog and mark it returned on the original checkout."
+          onClose={() => setModal(null)}
+        >
+          <form className="space-y-4" onSubmit={recoverLoan}>
+            <div className="rounded-xl bg-[#f3f6f1] p-4 text-[11px] leading-relaxed text-[#607667]">
+              <p className="font-bold text-[#46584b]">{modal.loan.bookTitle}</p>
+              <p className="mt-1">{modal.loan.memberName} · {modal.loan.missedQuantity} marked missing</p>
+            </div>
+            <Field label="Copies found">
+              <input autoFocus required type="number" min="1" max={modal.loan.missedQuantity} value={recoveryQuantity} onChange={(event) => setRecoveryQuantity(event.target.value)} />
+            </Field>
+            <p className="rounded-lg bg-[#edf4ed] px-3 py-2 text-[11px] text-[#52745b]">
+              The selected copies will be added back to the total and available book counts.
+            </p>
+            <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Restore found copies" />
           </form>
         </Modal>
       )}
@@ -1952,7 +2003,7 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
   )
 }
 
-function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn, onMissed, reminders, onOpenReminders, smsReminders, onOpenSmsReminders, activeBorrowers, onOpenBorrowerMessages, busy }) {
+function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn, onMissed, onRecover, reminders, onOpenReminders, smsReminders, onOpenSmsReminders, activeBorrowers, onOpenBorrowerMessages, busy }) {
   return (
     <>
       <PageHeading eyebrow="Every story has a return date" title="Loans & returns" description="Keep track of books finding their way back home.">
@@ -1984,7 +2035,34 @@ function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn,
                     : loan.status === 'Overdue'
                       ? 'bg-[#f9eee9] text-[#b46d53]'
                       : 'bg-[#edf4ed] text-[#64846b]'
-                return <tr key={loan.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="text-[11px] font-bold">{loan.bookTitle}</p><p className="mt-1 text-[9px] text-[#929d94]">ISBN {loan.isbn || 'not recorded'} · Copy {loan.copyCode || 'not recorded'}</p></div></div></td><td className="px-4 py-4"><p className="text-[10px] font-semibold">{loan.memberName}</p><p className="mt-1 text-[9px] text-[#929d94]">{loan.membershipNumber}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.issuedAt}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{loan.dueDate}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${statusClass}`}>{loan.status}</span><p className="mt-1.5 whitespace-nowrap text-[9px] text-[#929d94]">{loan.outstandingQuantity} out · {loan.returnedQuantity} returned · {loan.missedQuantity} missed</p></td><td className="space-x-1 px-5 py-4 text-right">{active && <><button disabled={busy} onClick={() => onMissed(loan)} className="rounded-lg bg-[#f8e8e4] px-3 py-2 text-[10px] font-bold text-[#a34d37] hover:bg-[#f2d9d2] disabled:opacity-50">Mark missed</button><button disabled={busy} onClick={() => onReturn(loan)} className="rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Mark returned</button></>}{!active && <span className="text-[10px] text-[#a0aaa2]">{loan.status === 'Missed' ? 'Marked missed' : <>All done <Check className="ml-1 inline" size={12} /></>}</span>}</td></tr>
+                return (
+                  <tr key={loan.id} className="transition hover:bg-[#fcfdfa]">
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <BookCover index={index} />
+                        <div>
+                          <p className="text-[11px] font-bold">{loan.bookTitle}</p>
+                          <p className="mt-1 text-[9px] text-[#929d94]">ISBN {loan.isbn || 'not recorded'} · Copy {loan.copyCode || 'not recorded'}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4"><p className="text-[10px] font-semibold">{loan.memberName}</p><p className="mt-1 text-[9px] text-[#929d94]">{loan.membershipNumber}</p></td>
+                    <td className="px-4 py-4 text-[10px] text-[#748078]">{loan.issuedAt}</td>
+                    <td className="px-4 py-4 text-[10px] text-[#748078]">{loan.dueDate}</td>
+                    <td className="px-4 py-4">
+                      <span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${statusClass}`}>{loan.status}</span>
+                      <p className="mt-1.5 whitespace-nowrap text-[9px] text-[#929d94]">{loan.outstandingQuantity} out · {loan.returnedQuantity} returned · {loan.missedQuantity} missed</p>
+                    </td>
+                    <td className="space-x-1 px-5 py-4 text-right">
+                      {active && <>
+                        <button disabled={busy} onClick={() => onMissed(loan)} className="rounded-lg bg-[#f8e8e4] px-3 py-2 text-[10px] font-bold text-[#a34d37] hover:bg-[#f2d9d2] disabled:opacity-50">Mark missed</button>
+                        <button disabled={busy} onClick={() => onReturn(loan)} className="rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Mark returned</button>
+                      </>}
+                      {Number(loan.missedQuantity) > 0 && <button disabled={busy} onClick={() => onRecover(loan)} className="rounded-lg bg-[#e8f2f2] px-3 py-2 text-[10px] font-bold text-[#3b7371] hover:bg-[#dceceb] disabled:opacity-50">Mark found</button>}
+                      {!active && Number(loan.missedQuantity) === 0 && <span className="text-[10px] text-[#a0aaa2]">All done <Check className="ml-1 inline" size={12} /></span>}
+                    </td>
+                  </tr>
+                )
               })}
               {loans.length === 0 && <EmptyRow colSpan={6} message={filter === 'All' ? 'No loans yet. Check out a book to get started.' : `No ${filter.toLowerCase()} loans right now.`} />}
             </tbody>
