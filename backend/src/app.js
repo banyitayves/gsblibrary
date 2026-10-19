@@ -1158,8 +1158,8 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
     }
     if (copyCode) {
       const [[existingCopy]] = await connection.execute(
-        'SELECT id FROM loans WHERE copy_code = ? AND quantity > returned_quantity + missed_quantity LIMIT 1 FOR UPDATE',
-        [copyCode],
+        'SELECT id FROM loans WHERE book_id = ? AND copy_code = ? AND quantity > returned_quantity + missed_quantity LIMIT 1 FOR UPDATE',
+        [bookId, copyCode],
       )
       if (existingCopy) {
         await connection.rollback()
@@ -1207,14 +1207,15 @@ app.post('/api/loans/batch', ...canManage, asyncRoute(async (req, res) => {
     const bookId = Number(item.bookId)
     const quantity = Number(item.quantity)
     const copyCode = String(item.copyCode || '').trim()
+    const copyIdentity = `${bookId}\u0000${copyCode.trim().toLowerCase()}`
     if (!Number.isSafeInteger(bookId) || bookId < 1
       || !Number.isInteger(quantity) || quantity < 1 || quantity > 300
       || copyCode.length > 64 || bookIds.has(bookId)
-      || (copyCode && copyCodes.has(copyCode))) {
+      || (copyCode && copyCodes.has(copyIdentity))) {
       return res.status(400).json({ error: 'Each book must be unique and have a valid quantity and copy code.' })
     }
     bookIds.add(bookId)
-    if (copyCode) copyCodes.add(copyCode)
+    if (copyCode) copyCodes.add(copyIdentity)
     totalQuantity += quantity
     normalizedItems.push({ bookId, quantity, copyCode })
   }
@@ -1271,8 +1272,8 @@ app.post('/api/loans/batch', ...canManage, asyncRoute(async (req, res) => {
       }
       if (item.copyCode) {
         const [[existingCopy]] = await connection.execute(
-          'SELECT id FROM loans WHERE copy_code = ? AND quantity > returned_quantity + missed_quantity LIMIT 1 FOR UPDATE',
-          [item.copyCode],
+          'SELECT id FROM loans WHERE book_id = ? AND copy_code = ? AND quantity > returned_quantity + missed_quantity LIMIT 1 FOR UPDATE',
+          [item.bookId, item.copyCode],
         )
         if (existingCopy) {
           await connection.rollback()

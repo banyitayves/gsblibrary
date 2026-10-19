@@ -168,7 +168,7 @@ function initials(name = '') {
 }
 
 function checkoutBookLabel(book) {
-  return `${book.title} · ${book.category || 'Uncategorized'} · Grade ${book.grade || 'not recorded'} · ${book.isbn || 'No ISBN'} · ${book.author || 'No author'} · ${book.shelf || 'No shelf'} · ${book.availableCopies} available`
+  return `${book.title} · ${book.category || 'Uncategorized'} · Grade ${book.grade || 'not recorded'} · ${book.bookType || 'General'} · ${book.isbn || 'No ISBN'} · ${book.author || 'No author'} · ${book.shelf || 'No shelf'} · ${book.availableCopies} available`
 }
 
 function App() {
