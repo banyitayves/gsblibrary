@@ -35,6 +35,7 @@ export async function migrateSchoolDirectory(connection) {
   for (const [name, definition] of [
     ['publisher', 'VARCHAR(180) NULL'],
     ['grade', 'VARCHAR(40) NULL'],
+    ['book_type', "VARCHAR(80) NOT NULL DEFAULT 'General'"],
     ['delivered_on', 'DATE NULL'],
     ['published_year', 'SMALLINT UNSIGNED NULL'],
   ]) {
@@ -42,6 +43,41 @@ export async function migrateSchoolDirectory(connection) {
       await connection.query(`ALTER TABLE books ADD COLUMN ${name} ${definition}`)
     }
   }
+  await connection.query("UPDATE books SET grade = '' WHERE grade IS NULL")
+  await connection.query("ALTER TABLE books MODIFY grade VARCHAR(40) NOT NULL DEFAULT ''")
+
+  const [bookIndexes] = await connection.execute(
+    `SELECT INDEX_NAME, NON_UNIQUE, COUNT(*) AS column_count,
+       GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS indexed_columns
+     FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'books'
+     GROUP BY INDEX_NAME, NON_UNIQUE`,
+  )
+  const isbnOnlyUniqueIndexes = bookIndexes.filter(
+    (index) => Number(index.NON_UNIQUE) === 0
+      && Number(index.column_count) === 1
+      && index.indexed_columns === 'isbn'
+      && index.INDEX_NAME !== 'PRIMARY'
+      && index.INDEX_NAME !== 'uq_books_physical_identity',
+  )
+  for (const index of isbnOnlyUniqueIndexes) {
+    const safeName = String(index.INDEX_NAME).replaceAll('`', '``')
+    await connection.query(`ALTER TABLE books DROP INDEX \`${safeName}\``)
+  }
+  const [currentBookIndexes] = await connection.execute(
+    `SELECT DISTINCT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'books'`,
+  )
+  const indexNames = new Set(currentBookIndexes.map((index) => index.INDEX_NAME))
+  if (!indexNames.has('idx_books_isbn')) {
+    await connection.query('CREATE INDEX idx_books_isbn ON books (isbn)')
+  }
+  if (!indexNames.has('uq_books_physical_identity')) {
+    await connection.query(
+      'CREATE UNIQUE INDEX uq_books_physical_identity ON books (isbn, title, grade, book_type)',
+    )
+  }
+
   if (existingBookColumns.has('published_on')) {
     await connection.query(
       'UPDATE books SET published_year = YEAR(published_on) WHERE published_year IS NULL AND published_on IS NOT NULL',

@@ -184,6 +184,7 @@ function validateBook(body) {
   const category = String(body.category || 'General').trim()
   const gradeValue = String(body.grade || '').trim()
   const grade = gradeValue || null
+  const bookType = String(body.bookType ?? body.book_type ?? 'General').trim() || 'General'
   const shelf = String(body.shelfLocation ?? body.shelf ?? '').trim() || 'Unassigned'
   const totalCopies = Number(body.totalCopies ?? body.copies)
   const deliveredOnValue = String(body.deliveredOn ?? body.dateDelivered ?? '').trim()
@@ -192,7 +193,7 @@ function validateBook(body) {
   const publicationYear = publicationYearValue ? Number(publicationYearValue) : null
 
   if (!title || title.length > 255 || (isbn && isbn.length > 32) || (author && author.length > 180)
-    || (publisher && publisher.length > 180) || (grade && grade.length > 40) || shelf.length > 40
+    || (publisher && publisher.length > 180) || (grade && grade.length > 40) || bookType.length > 80 || shelf.length > 40
     || !Number.isInteger(totalCopies) || totalCopies < 1 || totalCopies > 10000
     || (publicationYear !== null && (!Number.isInteger(publicationYear) || publicationYear < 1 || publicationYear > 9999))) {
     return { error: 'A title, valid optional book details, and a copy count between 1 and 10,000 are required.' }
@@ -204,7 +205,28 @@ function validateBook(body) {
     }
   }
 
-  return { value: { isbn, title, author: author || null, publisher, category, grade, shelf, totalCopies, deliveredOn, publicationYear } }
+  return { value: { isbn, title, author: author || null, publisher, category, grade: grade || '', bookType, shelf, totalCopies, deliveredOn, publicationYear } }
+}
+
+function bookIdentityKey(book) {
+  return [book.isbn, book.title, book.grade, book.bookType]
+    .map((value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase())
+    .join('\u0000')
+}
+
+async function findDuplicateBook(connection, book, excludeId = null) {
+  if (!book.isbn) return null
+  const [rows] = await connection.execute(
+    `SELECT id FROM books
+     WHERE LOWER(TRIM(isbn)) = LOWER(TRIM(?))
+       AND LOWER(TRIM(title)) = LOWER(TRIM(?))
+       AND LOWER(TRIM(COALESCE(grade, ''))) = LOWER(TRIM(?))
+       AND LOWER(TRIM(COALESCE(book_type, 'General'))) = LOWER(TRIM(?))
+       AND (? IS NULL OR id <> ?)
+     LIMIT 1`,
+    [book.isbn, book.title, book.grade, book.bookType, excludeId, excludeId],
+  )
+  return rows[0] || null
 }
 
 app.get('/api/health', asyncRoute(async (_req, res) => {
@@ -437,14 +459,14 @@ app.get('/api/dashboard', ...staff, asyncRoute(async (_req, res) => {
 app.get('/api/books', ...staff, asyncRoute(async (req, res) => {
   const search = `%${String(req.query.search || '').trim()}%`
   const [books] = await pool.execute(
-    `SELECT id, isbn, title, author, publisher, category, grade, shelf,
+    `SELECT id, isbn, title, author, publisher, category, grade, book_type AS bookType, shelf,
        total_copies AS totalCopies, available_copies AS availableCopies,
        DATE_FORMAT(delivered_on, '%Y-%m-%d') AS deliveredOn,
        published_year AS publicationYear
      FROM books
-     WHERE title LIKE ? OR author LIKE ? OR publisher LIKE ? OR isbn LIKE ? OR category LIKE ? OR grade LIKE ? OR shelf LIKE ?
+     WHERE title LIKE ? OR author LIKE ? OR publisher LIKE ? OR isbn LIKE ? OR category LIKE ? OR grade LIKE ? OR book_type LIKE ? OR shelf LIKE ?
      ORDER BY title`,
-    [search, search, search, search, search, search, search],
+    [search, search, search, search, search, search, search, search],
   )
   res.json(books.map((book) => ({ ...book, id: Number(book.id) })))
 }))
@@ -469,7 +491,7 @@ app.post('/api/books/import', ...canManage, asyncRoute(async (req, res) => {
   const imported = []
   const skipped = []
   const invalid = []
-  const seenIsbns = new Set()
+  const seenBookIdentities = new Set()
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
@@ -482,29 +504,31 @@ app.post('/api/books/import', ...canManage, asyncRoute(async (req, res) => {
         deliveredOn: row.date_delivered || row.delivered_on,
         publicationYear: row.publication_year || (row.date_of_publication ? String(row.date_of_publication).slice(0, 4) : ''),
         shelfLocation: row.shelf_location || row.shelf,
+        bookType: row.book_type || row.booktype || row.type,
       })
       const line = index + 1
       if (error) {
         invalid.push({ line, reason: error })
         continue
       }
-      if (value.isbn && seenIsbns.has(value.isbn)) {
-        skipped.push({ line, reason: 'Duplicate ISBN in this file.' })
-        continue
-      }
       if (value.isbn) {
-        seenIsbns.add(value.isbn)
-        const [[duplicate]] = await connection.execute('SELECT id FROM books WHERE isbn = ? LIMIT 1', [value.isbn])
+        const identity = bookIdentityKey(value)
+        if (seenBookIdentities.has(identity)) {
+          skipped.push({ line, reason: 'The physical code, title, grade, and book type are duplicated in this file.' })
+          continue
+        }
+        seenBookIdentities.add(identity)
+        const duplicate = await findDuplicateBook(connection, value)
         if (duplicate) {
-          skipped.push({ line, reason: 'ISBN already exists in the catalog.' })
+          skipped.push({ line, reason: 'The physical code is already used by this title, grade, and book type.' })
           continue
         }
       }
       await connection.execute(
         `INSERT INTO books
-         (isbn, title, author, publisher, category, grade, shelf, total_copies, available_copies, delivered_on, published_year)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.shelf, value.totalCopies, value.totalCopies, value.deliveredOn, value.publicationYear],
+         (isbn, title, author, publisher, category, grade, book_type, shelf, total_copies, available_copies, delivered_on, published_year)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.bookType, value.shelf, value.totalCopies, value.totalCopies, value.deliveredOn, value.publicationYear],
       )
       imported.push({ line, title: value.title })
     }
@@ -529,18 +553,22 @@ app.post('/api/books', ...canManage, asyncRoute(async (req, res) => {
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
+    if (await findDuplicateBook(connection, value)) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'That physical code is already used by the same title, grade, and book type.' })
+    }
     const [result] = await connection.execute(
       `INSERT INTO books
-       (isbn, title, author, publisher, category, grade, shelf, total_copies, available_copies, delivered_on, published_year)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.shelf, value.totalCopies, value.totalCopies, value.deliveredOn, value.publicationYear],
+       (isbn, title, author, publisher, category, grade, book_type, shelf, total_copies, available_copies, delivered_on, published_year)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.bookType, value.shelf, value.totalCopies, value.totalCopies, value.deliveredOn, value.publicationYear],
     )
     await audit(connection, req.user.name, 'Book added', `Added "${value.title}" to the catalog`)
     await connection.commit()
     res.status(201).json({ id: result.insertId, ...value, availableCopies: value.totalCopies })
   } catch (error) {
     await connection.rollback()
-    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'That ISBN is already in the catalog.' })
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'That physical code is already used by the same title, grade, and book type.' })
     throw error
   } finally {
     connection.release()
@@ -569,18 +597,22 @@ app.put('/api/books/:id', ...canManage, asyncRoute(async (req, res) => {
       await connection.rollback()
       return res.status(400).json({ error: `At least ${borrowed} copies are currently on loan.` })
     }
+    if (await findDuplicateBook(connection, value, Number(req.params.id))) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'That physical code is already used by the same title, grade, and book type.' })
+    }
     const availableCopies = value.totalCopies - borrowed
     await connection.execute(
-      `UPDATE books SET isbn = ?, title = ?, author = ?, publisher = ?, category = ?, grade = ?, shelf = ?,
+      `UPDATE books SET isbn = ?, title = ?, author = ?, publisher = ?, category = ?, grade = ?, book_type = ?, shelf = ?,
        total_copies = ?, available_copies = ?, delivered_on = ?, published_year = ? WHERE id = ?`,
-      [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.shelf, value.totalCopies, availableCopies, value.deliveredOn, value.publicationYear, req.params.id],
+      [value.isbn, value.title, value.author, value.publisher, value.category, value.grade, value.bookType, value.shelf, value.totalCopies, availableCopies, value.deliveredOn, value.publicationYear, req.params.id],
     )
     await audit(connection, req.user.name, 'Book updated', `Updated "${value.title}" in the catalog`)
     await connection.commit()
     res.json({ id: Number(req.params.id), ...value, availableCopies })
   } catch (error) {
     await connection.rollback()
-    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'That ISBN is already in the catalog.' })
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'That physical code is already used by the same title, grade, and book type.' })
     throw error
   } finally {
     connection.release()
@@ -979,11 +1011,11 @@ app.get('/api/reports/popular-books', ...staff, asyncRoute(async (req, res) => {
   const filters = reportFilters(req.query, false)
   if (filters.error) return res.status(400).json({ error: filters.error })
   const [books] = await pool.execute(
-    `SELECT b.id, b.isbn, b.title, b.author, b.publisher, b.category, b.grade, b.shelf,
+    `SELECT b.id, b.isbn, b.title, b.author, b.publisher, b.category, b.grade, b.book_type AS bookType, b.shelf,
        COALESCE(SUM(l.quantity), 0) AS totalLoans, COUNT(DISTINCT l.member_id) AS uniqueBorrowers
      FROM loans l JOIN books b ON b.id = l.book_id JOIN members m ON m.id = l.member_id
      ${filters.where}
-     GROUP BY b.id, b.isbn, b.title, b.author, b.publisher, b.category, b.grade, b.shelf
+     GROUP BY b.id, b.isbn, b.title, b.author, b.publisher, b.category, b.grade, b.book_type, b.shelf
      ORDER BY totalLoans DESC, b.title LIMIT 20000`,
     filters.params,
   )
@@ -1645,16 +1677,16 @@ app.get('/api/audit', ...staff, asyncRoute(async (_req, res) => {
 app.get('/api/export/books.csv', ...staff, asyncRoute(async (_req, res) => {
   const search = `%${String(_req.query.search || '').trim()}%`
   const [books] = await pool.query(
-    `SELECT title, isbn, publisher, author, category, grade, shelf,
+    `SELECT title, isbn, publisher, author, category, grade, book_type, shelf,
        total_copies AS total_copies, available_copies AS available_copies,
        DATE_FORMAT(delivered_on, '%Y-%m-%d') AS date_delivered,
        published_year AS publication_year
      FROM books
-     WHERE title LIKE ? OR author LIKE ? OR publisher LIKE ? OR isbn LIKE ? OR category LIKE ? OR grade LIKE ? OR shelf LIKE ?
+     WHERE title LIKE ? OR author LIKE ? OR publisher LIKE ? OR isbn LIKE ? OR category LIKE ? OR grade LIKE ? OR book_type LIKE ? OR shelf LIKE ?
      ORDER BY title`,
-    [search, search, search, search, search, search, search],
+    [search, search, search, search, search, search, search, search],
   )
-  const columns = ['title', 'isbn', 'publisher', 'author', 'category', 'grade', 'shelf', 'total_copies', 'available_copies', 'date_delivered', 'publication_year']
+  const columns = ['title', 'isbn', 'publisher', 'author', 'category', 'grade', 'book_type', 'shelf', 'total_copies', 'available_copies', 'date_delivered', 'publication_year']
   const csv = csvDocument(columns, books)
   res.type('text/csv').attachment('library-catalog.csv').send(csv)
 }))

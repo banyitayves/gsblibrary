@@ -9,12 +9,13 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS books (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  isbn VARCHAR(32) NULL UNIQUE,
+  isbn VARCHAR(32) NULL,
   title VARCHAR(255) NOT NULL,
   author VARCHAR(180) NULL,
   publisher VARCHAR(180) NULL,
   category VARCHAR(100) NOT NULL DEFAULT 'General',
-  grade VARCHAR(40) NULL,
+  grade VARCHAR(40) NOT NULL DEFAULT '',
+  book_type VARCHAR(80) NOT NULL DEFAULT 'General',
   shelf VARCHAR(40) NOT NULL DEFAULT 'Unassigned',
   total_copies INT UNSIGNED NOT NULL DEFAULT 1,
   available_copies INT UNSIGNED NOT NULL DEFAULT 1,
@@ -23,7 +24,8 @@ CREATE TABLE IF NOT EXISTS books (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_books_title (title),
-  INDEX idx_books_author (author)
+  INDEX idx_books_author (author),
+  UNIQUE INDEX uq_books_physical_identity (isbn, title, grade, book_type)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS members (
