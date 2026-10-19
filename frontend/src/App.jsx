@@ -2191,7 +2191,7 @@ function Loans({ loans, search, setSearch, filter, setFilter, memberTypeFilter, 
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[780px] text-left">
-            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Book</th><th className="px-4 py-3.5">Member</th><th className="px-4 py-3.5">Checked out</th><th className="px-4 py-3.5">Due date</th><th className="px-4 py-3.5">Status & copies</th><th className="px-5 py-3.5 text-right">Action</th></tr></thead>
+            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Member</th><th className="px-4 py-3.5">Book</th><th className="px-4 py-3.5">Checked out</th><th className="px-4 py-3.5">Due date</th><th className="px-4 py-3.5">Status & copies</th><th className="px-5 py-3.5 text-right">Action</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
               {loans.map((loan, index) => {
                 const active = Number(loan.outstandingQuantity) > 0
@@ -2206,6 +2206,15 @@ function Loans({ loans, search, setSearch, filter, setFilter, memberTypeFilter, 
                   <tr key={loan.id} className="transition hover:bg-[#fcfdfa]">
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
+                        <MemberPhoto memberId={loan.memberId} hasPhoto={Boolean(loan.hasPhoto)} name={loan.memberName} size="size-11" />
+                        <div>
+                          <p className="text-[10px] font-semibold">{loan.memberName}</p>
+                          <p className="mt-1 text-[9px] text-[#929d94]">{loan.membershipNumber}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-3">
                         <BookCover index={index} />
                         <div>
                           <p className="text-[11px] font-bold">{loan.bookTitle}</p>
@@ -2215,7 +2224,6 @@ function Loans({ loans, search, setSearch, filter, setFilter, memberTypeFilter, 
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-4"><p className="text-[10px] font-semibold">{loan.memberName}</p><p className="mt-1 text-[9px] text-[#929d94]">{loan.membershipNumber}</p></td>
                     <td className="px-4 py-4 text-[10px] text-[#748078]">{loan.issuedAt}</td>
                     <td className="px-4 py-4 text-[10px] text-[#748078]">{loan.dueDate}</td>
                     <td className="px-4 py-4">

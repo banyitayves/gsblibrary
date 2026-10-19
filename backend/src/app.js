@@ -913,7 +913,7 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
   const [loans] = await pool.query(
     `SELECT l.id, b.id AS bookId, b.title AS bookTitle, b.isbn, b.grade, l.copy_code AS copyCode,
        m.id AS memberId, m.name AS memberName, m.membership_number AS membershipNumber,
-       m.member_type AS memberType, m.class_section AS classSection,
+       m.member_type AS memberType, m.class_section AS classSection, (m.photo_data IS NOT NULL) AS hasPhoto,
        DATE_FORMAT(l.issued_at, '%Y-%m-%d') AS issuedAt,
        DATE_FORMAT(l.due_date, '%Y-%m-%d') AS dueDate,
        DATE_FORMAT(l.returned_at, '%Y-%m-%d') AS returnedAt,
@@ -928,7 +928,13 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
      FROM loans l JOIN books b ON b.id = l.book_id JOIN members m ON m.id = l.member_id
      ${where} ORDER BY l.issued_at DESC`,
   )
-  res.json(loans.map((loan) => ({ ...loan, id: Number(loan.id), bookId: Number(loan.bookId), memberId: Number(loan.memberId) })))
+  res.json(loans.map((loan) => ({
+    ...loan,
+    id: Number(loan.id),
+    bookId: Number(loan.bookId),
+    memberId: Number(loan.memberId),
+    hasPhoto: Boolean(Number(loan.hasPhoto)),
+  })))
 }))
 
 app.get('/api/reports', ...staff, asyncRoute(async (req, res) => {
