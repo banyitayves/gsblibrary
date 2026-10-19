@@ -188,6 +188,7 @@ function App() {
   const [attendanceSearch, setAttendanceSearch] = useState('')
   const [memberTypeFilter, setMemberTypeFilter] = useState('All')
   const [classFilter, setClassFilter] = useState('All')
+  const [loanMemberTypeFilter, setLoanMemberTypeFilter] = useState('All')
   const [loanFilter, setLoanFilter] = useState('All')
   const [reportData, setReportData] = useState(null)
   const [reportKind, setReportKind] = useState('loans')
@@ -304,9 +305,10 @@ function App() {
   const filteredLoans = useMemo(
     () => loans.filter((loan) =>
       (loanFilter === 'All' || loan.status === loanFilter)
+      && (loanMemberTypeFilter === 'All' || loan.memberType === loanMemberTypeFilter)
       && [loan.memberName, loan.membershipNumber, loan.bookTitle, loan.isbn, loan.copyCode].join(' ').toLowerCase().includes(search.trim().toLowerCase()),
     ),
-    [loans, loanFilter, search],
+    [loans, loanFilter, loanMemberTypeFilter, search],
   )
   const dueReminderRecipients = useMemo(
     () => groupReminderRecipients(members, loans, (loan) => loan.dueDate <= today()),
@@ -982,6 +984,8 @@ function App() {
               setSearch={setSearch}
               filter={loanFilter}
               setFilter={setLoanFilter}
+              memberTypeFilter={loanMemberTypeFilter}
+              setMemberTypeFilter={setLoanMemberTypeFilter}
               onIssue={openLoanForm}
               onReturn={(loan) => openLoanAction('return', loan)}
               onMissed={(loan) => openLoanAction('missed', loan)}
@@ -2003,7 +2007,11 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
   )
 }
 
-function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn, onMissed, onRecover, reminders, onOpenReminders, smsReminders, onOpenSmsReminders, activeBorrowers, onOpenBorrowerMessages, busy }) {
+function Loans({ loans, search, setSearch, filter, setFilter, memberTypeFilter, setMemberTypeFilter, onIssue, onReturn, onMissed, onRecover, reminders, onOpenReminders, smsReminders, onOpenSmsReminders, activeBorrowers, onOpenBorrowerMessages, busy }) {
+  const emptyMessage = filter === 'All' && memberTypeFilter === 'All' && !search.trim()
+    ? 'No loans yet. Check out a book to get started.'
+    : `No ${memberTypeFilter === 'All' ? '' : `${memberTypeFilter.toLowerCase()} `}${filter === 'All' ? '' : `${filter.toLowerCase()} `}loans match these filters.`
+
   return (
     <>
       <PageHeading eyebrow="Every story has a return date" title="Loans & returns" description="Keep track of books finding their way back home.">
@@ -2015,6 +2023,13 @@ function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn,
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0eb] px-5 py-4">
           <div className="flex flex-wrap items-center gap-2">
+            <label className="text-[10px] font-semibold text-[#78847c]">Type
+              <select className="ml-2 rounded-lg border border-[#e8ece6] bg-white px-2 py-2 text-[10px]" value={memberTypeFilter} onChange={(event) => setMemberTypeFilter(event.target.value)}>
+                <option>All</option>
+                <option>Student</option>
+                <option>Teacher</option>
+              </select>
+            </label>
             <div className="flex gap-1 rounded-xl bg-[#f5f7f3] p-1">
               {['All', 'Active', 'Overdue', 'Missed', 'Returned'].map((status) => <button key={status} onClick={() => setFilter(status)} className={`rounded-lg px-3 py-1.5 text-[10px] font-bold transition ${filter === status ? 'bg-white text-[#415b48] shadow-sm' : 'text-[#8a958c] hover:text-[#46584b]'}`}>{status}</button>)}
             </div>
@@ -2064,7 +2079,7 @@ function Loans({ loans, search, setSearch, filter, setFilter, onIssue, onReturn,
                   </tr>
                 )
               })}
-              {loans.length === 0 && <EmptyRow colSpan={6} message={filter === 'All' ? 'No loans yet. Check out a book to get started.' : `No ${filter.toLowerCase()} loans right now.`} />}
+              {loans.length === 0 && <EmptyRow colSpan={6} message={emptyMessage} />}
             </tbody>
           </table>
         </div>
