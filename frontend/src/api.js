@@ -21,3 +21,27 @@ export async function api(path, options = {}) {
   if (response.status === 204) return null
   return response.json()
 }
+
+export async function apiAsset(path) {
+  const token = sessionStorage.getItem('libraryflow-token')
+  const headers = new Headers()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  const response = await fetch(`${API_URL}/api${path}`, { headers })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    if (response.status === 401 && token) {
+      sessionStorage.removeItem('libraryflow-token')
+      sessionStorage.removeItem('libraryflow-user')
+      window.dispatchEvent(new Event('libraryflow:session-expired'))
+    }
+    throw new Error(payload.error || `Request failed (${response.status}).`)
+  }
+  const blob = await response.blob()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(new Error('Could not read the member photo.'))
+    reader.readAsDataURL(blob)
+  })
+}

@@ -2,6 +2,8 @@ const directoryColumns = [
   ['phone', 'VARCHAR(32) NULL'],
   ['member_type', "ENUM('Student', 'Teacher') NOT NULL DEFAULT 'Student'"],
   ['class_section', 'VARCHAR(20) NULL'],
+  ['photo_mime_type', 'VARCHAR(32) NULL'],
+  ['photo_data', 'MEDIUMBLOB NULL'],
 ]
 
 export async function migrateSchoolDirectory(connection) {

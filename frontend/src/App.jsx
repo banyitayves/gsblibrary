@@ -28,7 +28,7 @@ import {
   X,
   Sun,
 } from 'lucide-react'
-import { api } from './api.js'
+import { api, apiAsset } from './api.js'
 
 const schoolClasses = [
   'S1A', 'S1B', 'S1C', 'S1D', 'S1E', 'S1F',
@@ -48,6 +48,16 @@ const navigation = [
 ]
 
 const initialBook = { isbn: '', title: '', author: '', publisher: '', category: '', grade: '', bookType: 'General', shelf: '', totalCopies: 1, deliveredOn: '', publicationYear: '' }
+const initialMemberForm = () => ({
+  name: '',
+  membershipNumber: '',
+  email: '',
+  phone: '',
+  memberType: 'Student',
+  classSection: 'S1A',
+  photoAction: 'keep',
+  photoData: '',
+})
 const initialLoanForm = () => ({
   memberId: '',
   memberSearch: '',
@@ -172,6 +182,51 @@ function checkoutBookLabel(book) {
   return `${book.title} · ${book.category || 'Uncategorized'} · Grade ${book.grade || 'not recorded'} · ${book.bookType || 'General'} · ${book.isbn || 'No ISBN'} · ${book.author || 'No author'} · ${book.shelf || 'No shelf'} · ${book.availableCopies} available`
 }
 
+async function prepareMemberPhoto(file) {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    throw new Error('Choose a JPEG, PNG, or WebP photo.')
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error('The selected photo must be smaller than 10 MB.')
+  }
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const image = new Image()
+    await new Promise((resolve, reject) => {
+      image.onload = resolve
+      image.onerror = () => reject(new Error('The selected photo could not be opened.'))
+      image.src = objectUrl
+    })
+    if (!image.naturalWidth || !image.naturalHeight) {
+      throw new Error('The selected photo has invalid dimensions.')
+    }
+    const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Could not prepare the selected photo.')
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+    let photoBlob = null
+    for (const quality of [0.82, 0.68, 0.54]) {
+      photoBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
+      if (photoBlob && photoBlob.size <= 512 * 1024) break
+    }
+    if (!photoBlob || photoBlob.size > 512 * 1024) {
+      throw new Error('Could not compress this photo to 512 KB. Choose another image.')
+    }
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(new Error('Could not read the prepared photo.'))
+      reader.readAsDataURL(photoBlob)
+    })
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
 function App() {
   const [user, setUser] = useState(userFromSession)
   const [page, setPage] = useState('Dashboard')
@@ -200,7 +255,8 @@ function App() {
   const [selectedBorrowerIds, setSelectedBorrowerIds] = useState([])
   const [borrowerSearch, setBorrowerSearch] = useState('')
   const [bookForm, setBookForm] = useState(initialBook)
-  const [memberForm, setMemberForm] = useState({ name: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
+  const [memberForm, setMemberForm] = useState(initialMemberForm)
+  const [memberPhotoError, setMemberPhotoError] = useState('')
   const [loanForm, setLoanForm] = useState(initialLoanForm)
   const [loanActionQuantities, setLoanActionQuantities] = useState({ returned: '1', missed: '0' })
   const [recoveryQuantity, setRecoveryQuantity] = useState('1')
@@ -427,7 +483,8 @@ function App() {
         body: JSON.stringify(memberForm),
       })
       setModal(null)
-      setMemberForm({ name: '', membershipNumber: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' })
+      setMemberForm(initialMemberForm())
+      setMemberPhotoError('')
       notify(modal.member ? 'Member details updated.' : 'New member registered.')
       await loadData()
     } catch (error) {
@@ -963,7 +1020,7 @@ function App() {
               busy={busy}
               onImport={importMembers}
               onExport={() => downloadCsv('/export/members.csv', 'gs-busanza-members.csv')}
-              onAdd={() => { setMemberForm({ name: '', membershipNumber: '', email: '', phone: '', memberType: 'Student', classSection: 'S1A' }); setModal({ type: 'member' }) }}
+              onAdd={() => { setMemberForm(initialMemberForm()); setMemberPhotoError(''); setModal({ type: 'member' }) }}
               onEdit={(member) => {
                 setMemberForm({
                   name: member.name,
@@ -972,7 +1029,10 @@ function App() {
                   phone: member.phone || '',
                   memberType: member.memberType,
                   classSection: member.classSection || '',
+                  photoAction: 'keep',
+                  photoData: '',
                 })
+                setMemberPhotoError('')
                 setModal({ type: 'member', member })
               }}
               onDelete={deleteMember}
@@ -1077,6 +1137,67 @@ function App() {
             </div>
             <Field label="Email address (optional)"><input type="email" value={memberForm.email} onChange={(event) => setMemberForm({ ...memberForm, email: event.target.value })} placeholder="name@example.com" /></Field>
             <Field label="Phone / WhatsApp (optional)"><input type="tel" value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: event.target.value })} placeholder="+250 7XX XXX XXX" /></Field>
+            <section className="rounded-xl border border-[#e3eae0] bg-[#f8faf6] p-4">
+              <div className="flex items-center gap-3">
+                <MemberPhoto
+                  memberId={modal.member?.id}
+                  hasPhoto={Boolean(modal.member?.hasPhoto) && memberForm.photoAction !== 'remove'}
+                  preview={memberForm.photoAction === 'replace' ? memberForm.photoData : ''}
+                  name={memberForm.name || 'Member'}
+                  size="size-16"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-bold text-[#46584b]">Passport photo <span className="font-normal text-[#929d94]">(optional)</span></p>
+                  <p className="mt-1 text-[10px] text-[#748078]">Shown to staff when checking out a book. JPEG, PNG, or WebP; compressed to 512 KB.</p>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#e4f0df] px-3 py-2 text-[10px] font-bold text-[#285d43] hover:bg-[#dcebd6] ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+                  <Upload size={13} /> {memberForm.photoAction === 'replace' || modal.member?.hasPhoto ? 'Choose photo' : 'Upload photo'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="sr-only"
+                    disabled={busy}
+                    onChange={async (event) => {
+                      const input = event.currentTarget
+                      const file = input.files?.[0]
+                      if (!file) return
+                      try {
+                        const photoData = await prepareMemberPhoto(file)
+                        setMemberForm((current) => ({ ...current, photoAction: 'replace', photoData }))
+                        setMemberPhotoError('')
+                      } catch (error) {
+                        setMemberPhotoError(error.message)
+                      } finally {
+                        input.value = ''
+                      }
+                    }}
+                  />
+                </label>
+                {(memberForm.photoAction === 'replace' || modal.member?.hasPhoto) && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setMemberForm((current) => ({
+                        ...current,
+                        photoAction: current.photoAction === 'remove'
+                          ? 'keep'
+                          : modal.member?.hasPhoto ? 'remove' : 'keep',
+                        photoData: '',
+                      }))
+                      setMemberPhotoError('')
+                    }}
+                    className="rounded-lg border border-[#eadbd4] px-3 py-2 text-[10px] font-bold text-[#94614c] hover:bg-[#fbf0eb] disabled:opacity-50"
+                  >
+                    {memberForm.photoAction === 'remove' ? 'Keep current photo' : 'Remove photo'}
+                  </button>
+                )}
+              </div>
+              {memberPhotoError && <p role="alert" className="mt-2 text-[10px] font-semibold text-[#a34d37]">{memberPhotoError}</p>}
+              {memberForm.photoAction === 'remove' && <p className="mt-2 text-[10px] text-[#94614c]">Photo will be removed when you save.</p>}
+            </section>
             <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel={modal.member ? 'Save changes' : 'Register member'} />
           </form>
         </Modal>
@@ -1128,7 +1249,25 @@ function App() {
                   })}
                 </datalist>
               </Field>
-              {selectedLoanMember && <p className="rounded-lg bg-[#f3f6f1] px-3 py-2 text-[11px] text-[#607667]">{selectedLoanMember.memberType === 'Teacher' ? `Teacher limit: ${selectedLoanMember.activeLoans || 0} of 300 active copies; ${selectedMemberRemaining} more may be checked out across different titles.` : 'Students may have only one active book checked out.'}</p>}
+              {selectedLoanMember && (
+                <div className="flex items-center gap-3 rounded-xl border border-[#dce8dc] bg-[#f3f8f1] p-3">
+                  <MemberPhoto
+                    memberId={selectedLoanMember.id}
+                    hasPhoto={Boolean(selectedLoanMember.hasPhoto)}
+                    name={selectedLoanMember.name}
+                    size="size-14"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold text-[#46584b]">{selectedLoanMember.name}</p>
+                    <p className="mt-1 text-[10px] text-[#607667]">
+                      {selectedLoanMember.memberType}{selectedLoanMember.classSection ? ` · ${selectedLoanMember.classSection}` : ''} · {selectedLoanMember.membershipNumber}
+                    </p>
+                    <p className="mt-1 text-[10px] text-[#748078]">
+                      {selectedLoanMember.memberType === 'Teacher' ? `Teacher limit: ${selectedLoanMember.activeLoans || 0} of 300 active copies; ${selectedMemberRemaining} more may be checked out across different titles.` : 'Students may have only one active book checked out.'}
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="space-y-3">
                 {loanForm.items.map((item, index) => {
                   const selectedItem = selectedLoanItems[index]
@@ -2109,6 +2248,37 @@ function EmptyRow({ colSpan, message }) {
 
 function Field({ label, children }) {
   return <label className="block"><span className="mb-1.5 block text-[10px] font-bold text-[#627067]">{label}</span>{children}</label>
+}
+
+function MemberPhoto({ memberId, hasPhoto, preview = '', name, size }) {
+  const photoKey = preview || (memberId && hasPhoto ? String(memberId) : '')
+  const [loadedPhoto, setLoadedPhoto] = useState({ key: '', url: '', error: '' })
+  const photoUrl = loadedPhoto.key === photoKey && loadedPhoto.error
+    ? ''
+    : preview || (loadedPhoto.key === photoKey ? loadedPhoto.url : '')
+  const photoError = loadedPhoto.key === photoKey ? loadedPhoto.error : ''
+
+  useEffect(() => {
+    if (preview || !memberId || !hasPhoto) return undefined
+    let active = true
+    apiAsset(`/members/${memberId}/photo`)
+      .then((url) => { if (active) setLoadedPhoto({ key: photoKey, url, error: '' }) })
+      .catch((error) => {
+        if (active) setLoadedPhoto({ key: photoKey, url: '', error: error.message })
+      })
+    return () => {
+      active = false
+    }
+  }, [memberId, hasPhoto, preview, photoKey])
+
+  return (
+    <span className="inline-flex shrink-0 flex-col items-center">
+      {photoUrl
+        ? <img src={photoUrl} alt={`${name} passport photo`} className={`${size} rounded-full border-2 border-white object-cover shadow-sm`} onError={() => setLoadedPhoto({ key: photoKey, url: '', error: 'Photo could not be displayed.' })} />
+        : <span aria-label={`${name} initials`} className={`${size} flex items-center justify-center rounded-full bg-[#dcebd8] text-sm font-bold text-[#285d43]`}>{initials(name)}</span>}
+      {photoError && <span role="status" className="mt-1 max-w-24 text-center text-[9px] text-[#a34d37]">Photo unavailable</span>}
+    </span>
+  )
 }
 
 function Modal({ title, subtitle, onClose, children }) {

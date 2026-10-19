@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS members (
   phone VARCHAR(32) NULL,
   member_type ENUM('Student', 'Teacher') NOT NULL DEFAULT 'Student',
   class_section VARCHAR(20) NULL,
+  photo_mime_type VARCHAR(32) NULL,
+  photo_data MEDIUMBLOB NULL,
   status ENUM('Active', 'Suspended') NOT NULL DEFAULT 'Active',
   joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_members_name (name),

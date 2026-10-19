@@ -120,6 +120,28 @@ function validateMember(data) {
   }
 }
 
+function validateMemberPhoto(body, creating = false) {
+  const action = body.photoAction || (body.photoData ? 'replace' : 'keep')
+  if (!['keep', 'replace', 'remove'].includes(action)) {
+    return { error: 'Choose a valid photo action.' }
+  }
+  if (creating && action === 'remove') {
+    return { error: 'A new member does not have a photo to remove.' }
+  }
+  if (action !== 'replace') return { value: { action, mimeType: null, data: null } }
+
+  const match = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(String(body.photoData || ''))
+  if (!match) {
+    return { error: 'Upload a valid JPEG passport photo.' }
+  }
+  const data = Buffer.from(match[1], 'base64')
+  if (data.length < 4 || data.length > 512 * 1024 || data.toString('base64') !== match[1]
+    || data[0] !== 0xff || data[1] !== 0xd8 || data[2] !== 0xff) {
+    return { error: 'Photo must be a valid JPEG no larger than 512 KB.' }
+  }
+  return { value: { action, mimeType: 'image/jpeg', data } }
+}
+
 function reportFilters(query, includeStatus = true, dateColumn = 'l.issued_at') {
   const conditions = []
   const params = []
@@ -380,7 +402,7 @@ app.post('/api/admin/migrations/school-directory', ...canManage, asyncRoute(asyn
   const connection = await pool.getConnection()
   try {
     await migrateSchoolDirectory(connection)
-    await audit(connection, req.user.name, 'School directory migration applied', 'Updated student, teacher, book, and loan records and created the password reset token table')
+    await audit(connection, req.user.name, 'School directory migration applied', 'Updated student, teacher, book, and loan records, added staff-only member photo storage, and created the password reset token table')
     res.json({ message: 'The school directory and password reset database migrations are complete.' })
   } finally {
     connection.release()
@@ -658,6 +680,7 @@ app.get('/api/members', ...staff, asyncRoute(async (req, res) => {
   const [members] = await pool.execute(
     `SELECT m.id, m.membership_number AS membershipNumber, m.name, m.email, m.phone,
        m.member_type AS memberType, m.class_section AS classSection, m.status,
+       (m.photo_data IS NOT NULL) AS hasPhoto,
        DATE_FORMAT(m.joined_at, '%Y-%m-%d') AS joinedAt,
        (SELECT COALESCE(SUM(l.quantity - l.returned_quantity - l.missed_quantity), 0) FROM loans l WHERE l.member_id = m.id AND l.quantity > l.returned_quantity + l.missed_quantity) AS activeLoans,
        (SELECT COALESCE(SUM(l.quantity), 0) FROM loans l WHERE l.member_id = m.id) AS totalLoans
@@ -669,22 +692,50 @@ app.get('/api/members', ...staff, asyncRoute(async (req, res) => {
   res.json(members.map((member) => ({
     ...member,
     id: Number(member.id),
+    hasPhoto: Boolean(Number(member.hasPhoto)),
     activeLoans: Number(member.activeLoans),
     totalLoans: Number(member.totalLoans),
   })))
 }))
 
+app.get('/api/members/:id/photo', ...staff, asyncRoute(async (req, res) => {
+  const memberId = Number(req.params.id)
+  if (!Number.isSafeInteger(memberId) || memberId < 1) {
+    return res.status(400).json({ error: 'Member ID must be a positive integer.' })
+  }
+  const [[member]] = await pool.execute(
+    'SELECT photo_mime_type AS mimeType, photo_data AS photoData FROM members WHERE id = ?',
+    [memberId],
+  )
+  if (!member) return res.status(404).json({ error: 'Member not found.' })
+  if (!member.photoData || member.mimeType !== 'image/jpeg') {
+    return res.status(404).json({ error: 'This member has no photo.' })
+  }
+  res.set({
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+  })
+  res.type(member.mimeType).send(member.photoData)
+}))
+
 app.post('/api/members', ...canManage, asyncRoute(async (req, res) => {
   const { value, error } = validateMember(req.body)
   if (error) return res.status(400).json({ error })
+  const { value: photo, error: photoError } = validateMemberPhoto(req.body, true)
+  if (photoError) return res.status(400).json({ error: photoError })
 
   try {
     const [result] = await pool.execute(
-      `INSERT INTO members (membership_number, name, email, phone, member_type, class_section)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [value.membershipNumber, value.name, value.email, value.phone, value.memberType, value.classSection],
+      `INSERT INTO members (membership_number, name, email, phone, member_type, class_section, photo_mime_type, photo_data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [value.membershipNumber, value.name, value.email, value.phone, value.memberType, value.classSection, photo.mimeType, photo.data],
     )
-    await audit(pool, req.user.name, 'Member added', `Registered ${value.name} as a ${value.memberType.toLowerCase()}`)
+    await audit(
+      pool,
+      req.user.name,
+      'Member added',
+      `Registered ${value.name} as a ${value.memberType.toLowerCase()}${photo.action === 'replace' ? ' with a passport photo' : ''}`,
+    )
     res.status(201).json({
       id: result.insertId,
       ...value,
@@ -704,19 +755,28 @@ app.put('/api/members/:id', ...canManage, asyncRoute(async (req, res) => {
   }
   const { value, error } = validateMember(req.body)
   if (error) return res.status(400).json({ error })
+  const { value: photo, error: photoError } = validateMemberPhoto(req.body)
+  if (photoError) return res.status(400).json({ error: photoError })
 
   try {
+    const photoUpdate = photo.action === 'replace'
+      ? ', photo_mime_type = ?, photo_data = ?'
+      : photo.action === 'remove'
+        ? ', photo_mime_type = NULL, photo_data = NULL'
+        : ''
+    const photoParameters = photo.action === 'replace' ? [photo.mimeType, photo.data] : []
     const [result] = await pool.execute(
       `UPDATE members
-       SET membership_number = ?, name = ?, email = ?, phone = ?, member_type = ?, class_section = ?
+       SET membership_number = ?, name = ?, email = ?, phone = ?, member_type = ?, class_section = ?${photoUpdate}
        WHERE id = ?`,
-      [value.membershipNumber, value.name, value.email, value.phone, value.memberType, value.classSection, memberId],
+      [value.membershipNumber, value.name, value.email, value.phone, value.memberType, value.classSection, ...photoParameters, memberId],
     )
     if (!result.affectedRows) {
       const [[existing]] = await pool.execute('SELECT id FROM members WHERE id = ?', [memberId])
       if (!existing) return res.status(404).json({ error: 'Member not found.' })
     }
-    await audit(pool, req.user.name, 'Member updated', `Updated details for ${value.name} (${value.membershipNumber})`)
+    const photoAudit = photo.action === 'replace' ? '; passport photo updated' : photo.action === 'remove' ? '; passport photo removed' : ''
+    await audit(pool, req.user.name, 'Member updated', `Updated details for ${value.name} (${value.membershipNumber})${photoAudit}`)
     res.json({ id: memberId, ...value })
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'That membership number or email is already in use.' })
