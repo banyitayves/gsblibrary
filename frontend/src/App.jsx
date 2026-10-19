@@ -51,6 +51,7 @@ const initialBook = { isbn: '', title: '', author: '', publisher: '', category: 
 const initialLoanForm = () => ({
   memberId: '',
   memberSearch: '',
+  checkoutDate: today(),
   dueDate: '',
   items: [{ bookId: '', bookSearch: '', quantity: '1', copyCode: '' }],
 })
@@ -468,7 +469,12 @@ function App() {
     try {
       const checkout = await api('/loans/batch', {
         method: 'POST',
-        body: JSON.stringify({ memberId: Number(loanForm.memberId), dueDate: loanForm.dueDate, items }),
+        body: JSON.stringify({
+          memberId: Number(loanForm.memberId),
+          checkoutDate: loanForm.checkoutDate,
+          dueDate: loanForm.dueDate,
+          items,
+        }),
       })
       const checkoutBooks = new Map(books.map((book) => [Number(book.id), book]))
       setModal({
@@ -1135,7 +1141,17 @@ function App() {
               </div>
               {selectedLoanMember?.memberType === 'Teacher' && <button type="button" disabled={!canAddLoanItem} onClick={() => setLoanForm((current) => ({ ...current, items: [...current.items, { bookId: '', bookSearch: '', quantity: '1', copyCode: '' }] }))} className="flex items-center gap-1.5 rounded-lg border border-[#e8ece6] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#f7f8f5] disabled:cursor-not-allowed disabled:opacity-50"><Plus size={13} /> Add another title</button>}
               {selectedLoanMember?.memberType === 'Teacher' && <p className="text-[10px] text-[#8b968d]">{selectedLoanQuantity} of {selectedMemberRemaining} remaining checkout copies selected.</p>}
-              <Field label="Due date"><input required type="date" min={today()} value={loanForm.dueDate} onChange={(event) => setLoanForm({ ...loanForm, dueDate: event.target.value })} /></Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Checkout date"><input required type="date" max={today()} value={loanForm.checkoutDate} onChange={(event) => {
+                  const checkoutDate = event.target.value
+                  setLoanForm((current) => ({
+                    ...current,
+                    checkoutDate,
+                    dueDate: current.dueDate && current.dueDate < checkoutDate ? checkoutDate : current.dueDate,
+                  }))
+                }} /></Field>
+                <Field label="Due date"><input required type="date" min={loanForm.checkoutDate || undefined} value={loanForm.dueDate} onChange={(event) => setLoanForm({ ...loanForm, dueDate: event.target.value })} /></Field>
+              </div>
               <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel={`Check out ${selectedLoanQuantity} ${selectedLoanQuantity === 1 ? 'copy' : 'copies'}`} />
             </form>
           )}
@@ -1842,8 +1858,8 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
   }))
   const bookOptions = books.map((book) => ({
     id: String(book.id),
-    label: `${book.title}${book.isbn ? ` · ISBN ${book.isbn}` : ''} · ${book.shelf || 'No shelf'} · #${book.id}`,
-    search: `${book.title} ${book.isbn || ''} ${book.author || ''} ${book.publisher || ''} ${book.shelf || ''}`,
+    label: `${book.title}${book.grade ? ` · Grade ${book.grade}` : ''}${book.bookType ? ` · ${book.bookType}` : ''}${book.isbn ? ` · ISBN ${book.isbn}` : ''} · ${book.shelf || 'No shelf'} · #${book.id}`,
+    search: `${book.title} ${book.grade || ''} ${book.bookType || ''} ${book.isbn || ''} ${book.author || ''} ${book.publisher || ''} ${book.shelf || ''}`,
   }))
   const visibleMembers = memberOptions.filter((member) => !form.memberSearch || member.search.toLowerCase().includes(form.memberSearch.toLowerCase()))
   const visibleBooks = bookOptions.filter((book) => !form.bookSearch || book.search.toLowerCase().includes(form.bookSearch.toLowerCase()))
@@ -1884,7 +1900,7 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
             {form.memberId && <span className="mt-1 block text-[9px] text-[#587461]">Visitor selected</span>}
           </Field>
           <Field label="Book being read (optional)">
-            <input list="attendance-books" autoComplete="off" placeholder="Search book title, ISBN, author…" value={form.bookSearch} onChange={(event) => updateSearch('bookSearch', bookOptions, event.target.value)} />
+            <input type="search" list="attendance-books" autoComplete="off" placeholder="Search title, grade, type, ISBN, author…" value={form.bookSearch} onChange={(event) => updateSearch('bookSearch', bookOptions, event.target.value)} />
             <datalist id="attendance-books">{visibleBooks.map((book) => <option key={book.id} value={book.label} />)}</datalist>
             <span className="mt-1 block text-[9px] text-[#929d94]">{form.bookId ? 'Book selected' : 'Optional — leave blank if needed'}</span>
           </Field>

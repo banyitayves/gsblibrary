@@ -34,6 +34,12 @@ function formatLocalDate(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+function isValidIsoDate(date) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(date)
+    && !Number.isNaN(Date.parse(`${date}T00:00:00Z`))
+    && new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date
+}
+
 app.use(helmet())
 app.use(cors({
   origin(origin, callback) {
@@ -1104,11 +1110,13 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
   const bookId = Number(req.body.bookId)
   const memberId = Number(req.body.memberId)
   const quantity = Number(req.body.quantity ?? 1)
+  const checkoutDate = String(req.body.checkoutDate || formatLocalDate(new Date()))
   const dueDate = String(req.body.dueDate || '')
   if (!Number.isSafeInteger(bookId) || bookId < 1 || !Number.isSafeInteger(memberId) || memberId < 1
     || !Number.isInteger(quantity) || quantity < 1 || quantity > 300
-    || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
-    return res.status(400).json({ error: 'Choose a book, a member, a quantity from 1 to 300, and a valid due date.' })
+    || !isValidIsoDate(checkoutDate) || checkoutDate > formatLocalDate(new Date())
+    || !isValidIsoDate(dueDate) || dueDate < checkoutDate) {
+    return res.status(400).json({ error: 'Choose a book, a member, a quantity from 1 to 300, a valid checkout date, and a due date on or after checkout.' })
   }
 
   const connection = await pool.getConnection()
@@ -1167,18 +1175,18 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
       }
     }
     const [result] = await connection.execute(
-      'INSERT INTO loans (book_id, member_id, due_date, quantity, copy_code) VALUES (?, ?, ?, ?, ?)',
-      [bookId, memberId, dueDate, quantity, copyCode || null],
+      'INSERT INTO loans (book_id, member_id, issued_at, due_date, quantity, copy_code) VALUES (?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?)',
+      [bookId, memberId, checkoutDate === formatLocalDate(new Date()) ? null : `${checkoutDate} 12:00:00`, dueDate, quantity, copyCode || null],
     )
     await connection.execute(
       'UPDATE books SET available_copies = available_copies - ? WHERE id = ?',
       [quantity, bookId],
     )
-    await audit(connection, req.user.name, 'Book checked out', `"${book.title}" checked out to ${member.name}`)
+    await audit(connection, req.user.name, 'Book checked out', `"${book.title}" checked out to ${member.name} on ${checkoutDate}`)
     await connection.commit()
     connection.release()
     connectionReleased = true
-    res.status(201).json({ id: result.insertId, bookId, memberId, bookTitle: book.title, memberName: member.name, dueDate, quantity, returnedQuantity: 0, missedQuantity: 0, outstandingQuantity: quantity, copyCode: copyCode || null, status: 'Active' })
+    res.status(201).json({ id: result.insertId, bookId, memberId, bookTitle: book.title, memberName: member.name, issuedAt: checkoutDate, dueDate, quantity, returnedQuantity: 0, missedQuantity: 0, outstandingQuantity: quantity, copyCode: copyCode || null, status: 'Active' })
   } catch (error) {
     if (!connectionReleased) await connection.rollback()
     throw error
@@ -1189,12 +1197,14 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
 
 app.post('/api/loans/batch', ...canManage, asyncRoute(async (req, res) => {
   const memberId = Number(req.body.memberId)
+  const checkoutDate = String(req.body.checkoutDate || formatLocalDate(new Date()))
   const dueDate = String(req.body.dueDate || '')
   const items = req.body.items
   if (!Number.isSafeInteger(memberId) || memberId < 1
     || !Array.isArray(items) || items.length < 1 || items.length > 300
-    || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
-    return res.status(400).json({ error: 'Choose a member, one or more books, and a valid due date.' })
+    || !isValidIsoDate(checkoutDate) || checkoutDate > formatLocalDate(new Date())
+    || !isValidIsoDate(dueDate) || dueDate < checkoutDate) {
+    return res.status(400).json({ error: 'Choose a member, one or more books, a valid checkout date, and a due date on or after checkout.' })
   }
   const normalizedItems = []
   const bookIds = new Set()
@@ -1286,8 +1296,8 @@ app.post('/api/loans/batch', ...canManage, asyncRoute(async (req, res) => {
     for (const item of normalizedItems) {
       const book = booksById.get(item.bookId)
       const [result] = await connection.execute(
-        'INSERT INTO loans (book_id, member_id, due_date, quantity, copy_code) VALUES (?, ?, ?, ?, ?)',
-        [item.bookId, memberId, dueDate, item.quantity, item.copyCode || null],
+        'INSERT INTO loans (book_id, member_id, issued_at, due_date, quantity, copy_code) VALUES (?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?)',
+        [item.bookId, memberId, checkoutDate === formatLocalDate(new Date()) ? null : `${checkoutDate} 12:00:00`, dueDate, item.quantity, item.copyCode || null],
       )
       await connection.execute(
         'UPDATE books SET available_copies = available_copies - ? WHERE id = ?',
@@ -1301,10 +1311,10 @@ app.post('/api/loans/batch', ...canManage, asyncRoute(async (req, res) => {
         copyCode: item.copyCode || null,
       })
     }
-    const details = `${totalQuantity} copies across ${createdLoans.length} title(s) checked out to ${member.name}: ${createdLoans.map((loan) => loan.bookTitle).join(', ')}`.slice(0, 500)
-    await audit(connection, req.user.name, 'Books checked out', `${details} checked out to ${member.name}`)
+    const details = `${totalQuantity} copies across ${createdLoans.length} title(s) checked out to ${member.name} on ${checkoutDate}: ${createdLoans.map((loan) => loan.bookTitle).join(', ')}`.slice(0, 500)
+    await audit(connection, req.user.name, 'Books checked out', details)
     await connection.commit()
-    res.status(201).json({ memberId, memberName: member.name, dueDate, loans: createdLoans })
+    res.status(201).json({ memberId, memberName: member.name, issuedAt: checkoutDate, dueDate, loans: createdLoans })
   } catch (error) {
     await connection.rollback()
     throw error

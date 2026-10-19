@@ -6,7 +6,7 @@
 
 html {
   min-width: 360px;
-  background: #f7f8f5;
+  background: #f1f5ef;
   font-family: Inter, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -80,6 +80,72 @@ body {
   margin: 0;
 }
 
+html:not([data-theme="dark"]) body {
+  background:
+    radial-gradient(ellipse at 92% 0%, rgb(223 235 215 / 46%), transparent 31rem),
+    #f3f6f1;
+  color: #253a2e;
+}
+
+html:not([data-theme="dark"]) [class~="bg-[#f7f8f5]"] {
+  background-color: #f3f6f1;
+}
+
+html:not([data-theme="dark"]) header.sticky {
+  border-color: #e1e9df;
+  box-shadow: 0 4px 18px rgb(35 58 43 / 4%);
+}
+
+html:not([data-theme="dark"]) [class~="rounded-2xl"][class~="border"][class~="bg-white"] {
+  border-color: #e3eae0;
+  box-shadow: 0 8px 24px rgb(44 66 49 / 5%), 0 1px 2px rgb(44 66 49 / 3%);
+}
+
+html:not([data-theme="dark"]) main article[class~="rounded-2xl"] {
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+html:not([data-theme="dark"]) main article[class~="rounded-2xl"]:hover {
+  border-color: #d7e3d3;
+  box-shadow: 0 12px 28px rgb(44 66 49 / 8%), 0 2px 5px rgb(44 66 49 / 4%);
+  transform: translateY(-2px);
+}
+
+html:not([data-theme="dark"]) [class~="bg-[#315c46]"] {
+  background-image: linear-gradient(135deg, #35694e, #28543e);
+  box-shadow: 0 5px 12px rgb(40 84 62 / 17%);
+}
+
+html:not([data-theme="dark"]) [class~="bg-[#315c46]"]:hover {
+  background-image: linear-gradient(135deg, #2f5e45, #214832);
+  box-shadow: 0 7px 16px rgb(40 84 62 / 22%);
+}
+
+html:not([data-theme="dark"]) [class~="bg-[#edf5ef]"] {
+  background-color: #e8f2e7;
+}
+
+html:not([data-theme="dark"]) [class~="text-[#28644b]"],
+html:not([data-theme="dark"]) [class~="text-[#315c46]"] {
+  color: #285d43;
+}
+
+html:not([data-theme="dark"]) [class~="bg-[#f4f0e7]"] {
+  background-color: #f7f0df;
+}
+
+html:not([data-theme="dark"]) [class~="bg-[#efedf5]"] {
+  background-color: #f0edf7;
+}
+
+html:not([data-theme="dark"]) tbody tr {
+  transition: background-color 140ms ease;
+}
+
+html:not([data-theme="dark"]) tbody tr:hover {
+  background-color: #f5f9f3;
+}
+
 button,
 input,
 select {
@@ -100,8 +166,8 @@ select {
 
 input:focus,
 select:focus {
-  border-color: #9db9a0;
-  box-shadow: 0 0 0 3px rgb(96 132 106 / 10%);
+  border-color: #79a080;
+  box-shadow: 0 0 0 3px rgb(72 125 81 / 13%);
 }
 
 input::placeholder {
@@ -117,6 +183,15 @@ button:disabled {
 }
 
 ::selection {
-  background: #dce9dc;
-  color: #284737;
+  background: #d8e8d5;
+  color: #214b35;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
