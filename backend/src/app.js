@@ -1335,7 +1335,7 @@ app.get('/api/library-visits', ...staff, asyncRoute(async (req, res) => {
        m.membership_number AS membershipNumber, m.member_type AS memberType,
        m.class_section AS classSection, b.id AS bookId, b.title AS bookTitle,
        DATE_FORMAT(v.visit_date, '%Y-%m-%d') AS visitDate,
-       DATE_FORMAT(v.visited_at, '%H:%i') AS visitTime, v.recorded_by AS recordedBy
+       DATE_FORMAT(CONVERT_TZ(v.visited_at, @@session.time_zone, '+02:00'), '%H:%i') AS visitTime, v.recorded_by AS recordedBy
      FROM library_visits v
      JOIN members m ON m.id = v.member_id
      LEFT JOIN books b ON b.id = v.book_id
@@ -1377,7 +1377,7 @@ app.get('/api/library-visits/summary', ...staff, asyncRoute(async (req, res) => 
        m.member_type AS memberType, m.class_section AS classSection,
        COUNT(v.id) AS visitCount,
        COUNT(DISTINCT v.visit_date) AS daysVisited,
-       DATE_FORMAT(MAX(v.visited_at), '%Y-%m-%d %H:%i') AS lastVisit
+       DATE_FORMAT(CONVERT_TZ(MAX(v.visited_at), @@session.time_zone, '+02:00'), '%Y-%m-%d %H:%i') AS lastVisit
      FROM library_visits v JOIN members m ON m.id = v.member_id
      WHERE v.visit_date BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND ?
      GROUP BY m.id, m.name, m.membership_number, m.member_type, m.class_section
@@ -1475,7 +1475,7 @@ app.get('/api/export/library-visits.csv', ...staff, asyncRoute(async (req, res) 
   }
   const [visits] = await pool.execute(
     `SELECT DATE_FORMAT(v.visit_date, '%Y-%m-%d') AS visitDate,
-       DATE_FORMAT(v.visited_at, '%H:%i') AS visitTime, m.name AS memberName,
+       DATE_FORMAT(CONVERT_TZ(v.visited_at, @@session.time_zone, '+02:00'), '%H:%i') AS visitTime, m.name AS memberName,
        m.membership_number AS membershipNumber, m.member_type AS memberType,
        m.class_section AS classSection, b.title AS bookTitle, v.recorded_by AS recordedBy
      FROM library_visits v JOIN members m ON m.id = v.member_id
