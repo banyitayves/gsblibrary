@@ -164,7 +164,7 @@ function reportFilters(query, includeStatus = true, dateColumn = 'l.issued_at') 
   return { where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params }
 }
 
-const loanReportSelect = `SELECT l.id, b.title AS bookTitle, b.isbn,
+const loanReportSelect = `SELECT l.id, b.title AS bookTitle, b.isbn, b.grade,
   m.id AS memberId, m.name AS memberName, m.membership_number AS membershipNumber,
   m.member_type AS memberType, m.class_section AS classSection, m.email, l.copy_code AS copyCode,
   DATE_FORMAT(l.issued_at, '%Y-%m-%d') AS issuedAt,
@@ -851,7 +851,7 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
       : missedOnly ? 'WHERE l.missed_quantity > 0'
         : returnedOnly ? 'WHERE l.quantity = l.returned_quantity AND l.missed_quantity = 0' : ''
   const [loans] = await pool.query(
-    `SELECT l.id, b.id AS bookId, b.title AS bookTitle, b.isbn, l.copy_code AS copyCode,
+    `SELECT l.id, b.id AS bookId, b.title AS bookTitle, b.isbn, b.grade, l.copy_code AS copyCode,
        m.id AS memberId, m.name AS memberName, m.membership_number AS membershipNumber,
        m.member_type AS memberType, m.class_section AS classSection,
        DATE_FORMAT(l.issued_at, '%Y-%m-%d') AS issuedAt,

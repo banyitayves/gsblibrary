@@ -306,7 +306,7 @@ function App() {
     () => loans.filter((loan) =>
       (loanFilter === 'All' || loan.status === loanFilter)
       && (loanMemberTypeFilter === 'All' || loan.memberType === loanMemberTypeFilter)
-      && [loan.memberName, loan.membershipNumber, loan.bookTitle, loan.isbn, loan.copyCode].join(' ').toLowerCase().includes(search.trim().toLowerCase()),
+      && [loan.memberName, loan.membershipNumber, loan.bookTitle, loan.grade, loan.isbn, loan.copyCode].join(' ').toLowerCase().includes(search.trim().toLowerCase()),
     ),
     [loans, loanFilter, loanMemberTypeFilter, search],
   )
@@ -2057,7 +2057,9 @@ function Loans({ loans, search, setSearch, filter, setFilter, memberTypeFilter, 
                         <BookCover index={index} />
                         <div>
                           <p className="text-[11px] font-bold">{loan.bookTitle}</p>
-                          <p className="mt-1 text-[9px] text-[#929d94]">ISBN {loan.isbn || 'not recorded'} · Copy {loan.copyCode || 'not recorded'}</p>
+                          <p className="mt-1 text-[9px] text-[#929d94]">
+                            Grade {loan.grade || 'not recorded'} · ISBN {loan.isbn || 'not recorded'} · Copy {loan.copyCode || 'not recorded'}
+                          </p>
                         </div>
                       </div>
                     </td>
