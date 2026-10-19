@@ -1954,7 +1954,7 @@ function Members({ members, search, setSearch, typeFilter, setTypeFilter, classF
           <table className="w-full min-w-[900px] text-left">
             <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Student or teacher</th><th className="px-4 py-3.5">Type / class</th><th className="px-4 py-3.5">Membership no.</th><th className="px-4 py-3.5">Email</th><th className="px-4 py-3.5">Books out</th><th className="px-4 py-3.5">Status</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {members.map((member, index) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><div className={`flex size-9 items-center justify-center rounded-full text-[10px] font-bold ${['bg-[#edf2e9] text-[#6b846c]', 'bg-[#f2ede6] text-[#a17e5c]', 'bg-[#eeebf4] text-[#7e719a]', 'bg-[#f4ece8] text-[#a67762]'][index % 4]}`}>{initials(member.name)}</div><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td><td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}<p className="mt-1 text-[9px] text-[#929d94]">{member.phone || 'No phone provided'}</p></td><td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td><td className="px-5 py-4 text-right">{canManage && <><button disabled={busy} onClick={() => onEdit(member)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Edit</button><button disabled={busy} onClick={() => onDelete(member)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button></>}</td></tr>)}
+              {members.map((member) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><MemberPhoto memberId={member.id} hasPhoto={Boolean(member.hasPhoto)} name={member.name} size="size-11" deferLoad /><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td><td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}<p className="mt-1 text-[9px] text-[#929d94]">{member.phone || 'No phone provided'}</p></td><td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td><td className="px-5 py-4 text-right">{canManage && <><button disabled={busy} onClick={() => onEdit(member)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Edit</button><button disabled={busy} onClick={() => onDelete(member)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button></>}</td></tr>)}
               {members.length === 0 && <EmptyRow colSpan={7} message="No students or teachers match these filters. Import a CSV or add a person." />}
             </tbody>
           </table>
@@ -2250,16 +2250,33 @@ function Field({ label, children }) {
   return <label className="block"><span className="mb-1.5 block text-[10px] font-bold text-[#627067]">{label}</span>{children}</label>
 }
 
-function MemberPhoto({ memberId, hasPhoto, preview = '', name, size }) {
+function MemberPhoto({ memberId, hasPhoto, preview = '', name, size, deferLoad = false }) {
   const photoKey = preview || (memberId && hasPhoto ? String(memberId) : '')
+  const photoRef = useRef(null)
+  const [isVisible, setIsVisible] = useState(() => !deferLoad || typeof IntersectionObserver === 'undefined')
   const [loadedPhoto, setLoadedPhoto] = useState({ key: '', url: '', error: '' })
+  const [zoomOpen, setZoomOpen] = useState(false)
   const photoUrl = loadedPhoto.key === photoKey && loadedPhoto.error
     ? ''
     : preview || (loadedPhoto.key === photoKey ? loadedPhoto.url : '')
   const photoError = loadedPhoto.key === photoKey ? loadedPhoto.error : ''
 
   useEffect(() => {
-    if (preview || !memberId || !hasPhoto) return undefined
+    if (!deferLoad || isVisible) return undefined
+    const element = photoRef.current
+    if (!element) return undefined
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setIsVisible(true)
+        observer.disconnect()
+      }
+    }, { rootMargin: '160px' })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [deferLoad, isVisible])
+
+  useEffect(() => {
+    if (preview || !memberId || !hasPhoto || !isVisible) return undefined
     let active = true
     apiAsset(`/members/${memberId}/photo`)
       .then((url) => { if (active) setLoadedPhoto({ key: photoKey, url, error: '' }) })
@@ -2269,14 +2286,22 @@ function MemberPhoto({ memberId, hasPhoto, preview = '', name, size }) {
     return () => {
       active = false
     }
-  }, [memberId, hasPhoto, preview, photoKey])
+  }, [memberId, hasPhoto, preview, photoKey, isVisible])
+
+  useEffect(() => {
+    if (!zoomOpen) return undefined
+    const closeOnEscape = (event) => { if (event.key === 'Escape') setZoomOpen(false) }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [zoomOpen])
 
   return (
-    <span className="inline-flex shrink-0 flex-col items-center">
+    <span ref={photoRef} className="inline-flex shrink-0 flex-col items-center">
       {photoUrl
-        ? <img src={photoUrl} alt={`${name} passport photo`} className={`${size} rounded-full border-2 border-white object-cover shadow-sm`} onError={() => setLoadedPhoto({ key: photoKey, url: '', error: 'Photo could not be displayed.' })} />
+        ? <button type="button" onClick={() => setZoomOpen(true)} aria-label={`View ${name}'s photo larger`} className="rounded-full transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-[#648b6b] focus:ring-offset-2"><img src={photoUrl} alt={`${name} passport photo`} className={`${size} rounded-full border-2 border-white object-cover shadow-sm`} onError={() => setLoadedPhoto({ key: photoKey, url: '', error: 'Photo could not be displayed.' })} /></button>
         : <span aria-label={`${name} initials`} className={`${size} flex items-center justify-center rounded-full bg-[#dcebd8] text-sm font-bold text-[#285d43]`}>{initials(name)}</span>}
       {photoError && <span role="status" className="mt-1 max-w-24 text-center text-[9px] text-[#a34d37]">Photo unavailable</span>}
+      {zoomOpen && photoUrl && <div role="presentation" onClick={() => setZoomOpen(false)} className="fixed inset-0 z-[100] flex items-center justify-center bg-[#17221b]/75 p-5 backdrop-blur-sm"><section role="dialog" aria-modal="true" aria-label={`${name}'s passport photo`} onClick={(event) => event.stopPropagation()} className="relative flex max-h-[90vh] max-w-[90vw] flex-col items-center gap-3 rounded-2xl bg-white p-4 shadow-2xl sm:p-6"><button type="button" onClick={() => setZoomOpen(false)} aria-label="Close enlarged photo" className="absolute right-2 top-2 rounded-full bg-white/90 p-2 text-[#52685a] shadow hover:bg-[#edf4ed]"><X size={18} /></button><img src={photoUrl} alt={`${name} passport photo`} className="max-h-[75vh] max-w-[85vw] rounded-xl object-contain" /><p className="pr-8 text-center text-sm font-semibold text-[#46584b]">{name}</p></section></div>}
     </span>
   )
 }
