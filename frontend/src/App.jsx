@@ -20,11 +20,9 @@ import {
   MessageCircle,
   MessageSquareText,
   Moon,
-  Pencil,
   Plus,
   Search,
   Sparkles,
-  Trash2,
   Upload,
   UsersRound,
   X,
@@ -1882,27 +1880,18 @@ function SearchBox({ value, onChange, placeholder }) {
 
 function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd, onEdit, onDelete, onExport, canManage }) {
   const [shelfFilter, setShelfFilter] = useState('All')
-  const [deliveryFrom, setDeliveryFrom] = useState('')
-  const [deliveryTo, setDeliveryTo] = useState('')
+  const [deliveryDate, setDeliveryDate] = useState('')
   const filteredBooks = books.filter((book) => {
     const shelf = String(book.shelf || '').trim()
     const nameMatches = book.title.toLowerCase().includes(search.trim().toLowerCase())
     const shelfMatches = shelfFilter === 'All'
       || (shelfFilter === '__unassigned__' ? !shelf : shelf === shelfFilter)
-    const dateMatches = (!deliveryFrom || (book.deliveredOn && book.deliveredOn >= deliveryFrom))
-      && (!deliveryTo || (book.deliveredOn && book.deliveredOn <= deliveryTo))
+    const dateMatches = !deliveryDate || book.deliveredOn === deliveryDate
     return nameMatches && shelfMatches && dateMatches
   })
   const shelves = [...new Set(books.map((book) => String(book.shelf || '').trim()).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }))
   const hasUnassignedShelf = books.some((book) => !String(book.shelf || '').trim())
-  const shelfGroups = Array.from(filteredBooks.reduce((groups, book) => {
-    const shelf = String(book.shelf || '').trim() || 'Shelf not assigned'
-    if (!groups.has(shelf)) groups.set(shelf, [])
-    groups.get(shelf).push(book)
-    return groups
-  }, new Map())).sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }))
-
   return (
     <>
       <PageHeading eyebrow="Manage and import library books" title="Book collection" description={`${filteredBooks.length} of ${books.length} title${books.length === 1 ? '' : 's'}`}>
@@ -1920,15 +1909,11 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
           </select>
         </label>
         <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-[#78847c]">
-          Delivered from
-          <input aria-label="Filter by delivery start date" type="date" className="rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px] text-[#35483a]" value={deliveryFrom} max={deliveryTo || undefined} onChange={(event) => setDeliveryFrom(event.target.value)} />
-        </label>
-        <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-[#78847c]">
-          Delivered to
-          <input aria-label="Filter by delivery end date" type="date" className="rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px] text-[#35483a]" value={deliveryTo} min={deliveryFrom || undefined} onChange={(event) => setDeliveryTo(event.target.value)} />
+          Delivered date
+          <input aria-label="Filter by delivery date" type="date" className="rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px] text-[#35483a]" value={deliveryDate} onChange={(event) => setDeliveryDate(event.target.value)} />
         </label>
         <div className="flex items-end">
-          <button type="button" onClick={() => { setSearch(''); setShelfFilter('All'); setDeliveryFrom(''); setDeliveryTo('') }} className="w-full rounded-lg border border-[#e8ece6] px-3 py-2.5 text-[10px] font-semibold text-[#607667] hover:bg-[#f7f8f5]">Clear filters</button>
+          <button type="button" onClick={() => { setSearch(''); setShelfFilter('All'); setDeliveryDate('') }} className="w-full rounded-lg border border-[#e8ece6] px-3 py-2.5 text-[10px] font-semibold text-[#607667] hover:bg-[#f7f8f5]">Clear filters</button>
         </div>
       </section>
       <section className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-[#e9ede7] bg-white p-4">
@@ -1943,47 +1928,6 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
         <p className="font-bold">Book import: {importResult.imported} titles added, {importResult.skipped.length} duplicates skipped, {importResult.invalid.length} invalid rows.</p>
         {[...importResult.skipped, ...importResult.invalid].slice(0, 5).map((row) => <p key={`${row.line}-${row.reason}`} className="mt-1">Row {row.line}: {row.reason}</p>)}
       </section>}
-      <section aria-label="Books grouped by shelf" className="mb-4 rounded-2xl border border-[#e9ede7] bg-white p-4 sm:p-5">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <p className="text-[11px] font-bold">Books by shelf</p>
-            <p className="mt-1 text-[10px] text-[#929d94]">See which titles are stored at each shelf location.</p>
-          </div>
-          <span className="text-[10px] text-[#78847c]">{shelfGroups.length} {shelfGroups.length === 1 ? 'shelf' : 'shelves'} · {filteredBooks.length} {filteredBooks.length === 1 ? 'title' : 'titles'}</span>
-        </div>
-        {shelfGroups.length > 0 ? (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {shelfGroups.map(([shelf, shelfBooks]) => (
-              <article key={shelf} className="min-w-0 rounded-xl border border-[#e8ece6] bg-[#fbfcfa] p-3.5">
-                <div className="mb-3 flex items-center justify-between gap-2 border-b border-[#edf0eb] pb-2.5">
-                  <h3 className="flex min-w-0 items-center gap-2 text-[11px] font-bold">
-                    <BookOpen size={14} className="shrink-0 text-[#58745e]" />
-                    <span className="break-words">{shelf}</span>
-                  </h3>
-                  <span className="shrink-0 rounded-full bg-[#edf4ed] px-2 py-1 text-[9px] font-semibold text-[#52745b]">{shelfBooks.length} {shelfBooks.length === 1 ? 'title' : 'titles'}</span>
-                </div>
-                <ul className="space-y-2.5">
-                  {shelfBooks.map((book) => (
-                    <li key={book.id} className="flex min-w-0 items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="break-words text-[10px] font-semibold text-[#35483a]">{book.title}</p>
-                        <p className="mt-0.5 text-[9px] text-[#929d94]">{[book.grade && `Grade ${book.grade}`, book.bookType, book.isbn, book.deliveredOn && `Delivered ${book.deliveredOn}`].filter(Boolean).join(' · ') || book.category || 'Book'}</p>
-                        <div className="mt-1.5 flex gap-1">
-                          <button type="button" disabled={busy} onClick={() => onEdit(book)} aria-label={`Edit ${book.title}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-semibold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50"><Pencil size={11} /> Edit</button>
-                          {canManage && <button type="button" disabled={busy} onClick={() => onDelete(book)} aria-label={`Delete ${book.title}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50"><Trash2 size={11} /> Delete</button>}
-                        </div>
-                      </div>
-                      <span className="shrink-0 pt-0.5 text-[9px] text-[#78847c]">{book.availableCopies} / {book.totalCopies} available</span>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="rounded-xl border border-dashed border-[#dfe6dc] px-4 py-6 text-center text-[10px] text-[#929d94]">No books match your search.</p>
-        )}
-      </section>
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1080px] text-left">
