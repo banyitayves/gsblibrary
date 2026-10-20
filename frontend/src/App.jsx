@@ -1886,10 +1886,17 @@ function SearchBox({ value, onChange, placeholder }) {
 }
 
 function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd, onEdit, onDelete, onExport, canManage }) {
+  const shelfGroups = Array.from(books.reduce((groups, book) => {
+    const shelf = String(book.shelf || '').trim() || 'Shelf not assigned'
+    if (!groups.has(shelf)) groups.set(shelf, [])
+    groups.get(shelf).push(book)
+    return groups
+  }, new Map())).sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }))
+
   return (
     <>
       <PageHeading eyebrow="Manage and import library books" title="Book collection" description={`${books.length} title${books.length === 1 ? '' : 's'} to explore`}>
-        <SearchBox value={search} onChange={setSearch} placeholder="Search title, author, ISBN…" />
+        <SearchBox value={search} onChange={setSearch} placeholder="Search title, author, ISBN, shelf…" />
         <ActionButton secondary icon={Download} onClick={onExport}>Export CSV</ActionButton>
         <ActionButton onClick={onAdd}>Add a book</ActionButton>
       </PageHeading>
@@ -1905,6 +1912,43 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
         <p className="font-bold">Book import: {importResult.imported} titles added, {importResult.skipped.length} duplicates skipped, {importResult.invalid.length} invalid rows.</p>
         {[...importResult.skipped, ...importResult.invalid].slice(0, 5).map((row) => <p key={`${row.line}-${row.reason}`} className="mt-1">Row {row.line}: {row.reason}</p>)}
       </section>}
+      <section aria-label="Books grouped by shelf" className="mb-4 rounded-2xl border border-[#e9ede7] bg-white p-4 sm:p-5">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <p className="text-[11px] font-bold">Books by shelf</p>
+            <p className="mt-1 text-[10px] text-[#929d94]">See which titles are stored at each shelf location.</p>
+          </div>
+          <span className="text-[10px] text-[#78847c]">{shelfGroups.length} {shelfGroups.length === 1 ? 'shelf' : 'shelves'} · {books.length} {books.length === 1 ? 'title' : 'titles'}</span>
+        </div>
+        {shelfGroups.length > 0 ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {shelfGroups.map(([shelf, shelfBooks]) => (
+              <article key={shelf} className="min-w-0 rounded-xl border border-[#e8ece6] bg-[#fbfcfa] p-3.5">
+                <div className="mb-3 flex items-center justify-between gap-2 border-b border-[#edf0eb] pb-2.5">
+                  <h3 className="flex min-w-0 items-center gap-2 text-[11px] font-bold">
+                    <BookOpen size={14} className="shrink-0 text-[#58745e]" />
+                    <span className="break-words">{shelf}</span>
+                  </h3>
+                  <span className="shrink-0 rounded-full bg-[#edf4ed] px-2 py-1 text-[9px] font-semibold text-[#52745b]">{shelfBooks.length} {shelfBooks.length === 1 ? 'title' : 'titles'}</span>
+                </div>
+                <ul className="space-y-2.5">
+                  {shelfBooks.map((book) => (
+                    <li key={book.id} className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words text-[10px] font-semibold text-[#35483a]">{book.title}</p>
+                        <p className="mt-0.5 text-[9px] text-[#929d94]">{[book.grade && `Grade ${book.grade}`, book.bookType, book.isbn].filter(Boolean).join(' · ') || book.category || 'Book'}</p>
+                      </div>
+                      <span className="shrink-0 pt-0.5 text-[9px] text-[#78847c]">{book.availableCopies} / {book.totalCopies} available</span>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-xl border border-dashed border-[#dfe6dc] px-4 py-6 text-center text-[10px] text-[#929d94]">No books match your search.</p>
+        )}
+      </section>
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1080px] text-left">
