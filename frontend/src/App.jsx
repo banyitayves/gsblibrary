@@ -20,9 +20,11 @@ import {
   MessageCircle,
   MessageSquareText,
   Moon,
+  Pencil,
   Plus,
   Search,
   Sparkles,
+  Trash2,
   Upload,
   UsersRound,
   X,
@@ -342,13 +344,6 @@ function App() {
     window.addEventListener('libraryflow:session-expired', expireSession)
     return () => window.removeEventListener('libraryflow:session-expired', expireSession)
   }, [notify])
-
-  const filteredBooks = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    return books.filter((book) =>
-      [book.title, book.author, book.publisher, book.isbn, book.category, book.grade, book.bookType, book.shelf].join(' ').toLowerCase().includes(term),
-    )
-  }, [books, search])
 
   const filteredMembers = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -673,7 +668,7 @@ function App() {
   }
 
   async function deleteBook(book) {
-    if (!window.confirm(`Delete “${book.title}” from the catalog? Books with loan history cannot be deleted.`)) return
+    if (!window.confirm(`Are you sure you want to delete “${book.title}” from the catalog? Books with loan history cannot be deleted.`)) return
     setBusy(true)
     try {
       await api(`/books/${book.id}`, { method: 'DELETE' })
@@ -994,7 +989,7 @@ function App() {
           )}
           {page === 'Catalog' && (
             <Catalog
-              books={filteredBooks}
+              books={books}
               search={search}
               setSearch={setSearch}
               importResult={bookImportResult}
@@ -1886,7 +1881,22 @@ function SearchBox({ value, onChange, placeholder }) {
 }
 
 function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd, onEdit, onDelete, onExport, canManage }) {
-  const shelfGroups = Array.from(books.reduce((groups, book) => {
+  const [shelfFilter, setShelfFilter] = useState('All')
+  const [deliveryFrom, setDeliveryFrom] = useState('')
+  const [deliveryTo, setDeliveryTo] = useState('')
+  const filteredBooks = books.filter((book) => {
+    const shelf = String(book.shelf || '').trim()
+    const nameMatches = book.title.toLowerCase().includes(search.trim().toLowerCase())
+    const shelfMatches = shelfFilter === 'All'
+      || (shelfFilter === '__unassigned__' ? !shelf : shelf === shelfFilter)
+    const dateMatches = (!deliveryFrom || (book.deliveredOn && book.deliveredOn >= deliveryFrom))
+      && (!deliveryTo || (book.deliveredOn && book.deliveredOn <= deliveryTo))
+    return nameMatches && shelfMatches && dateMatches
+  })
+  const shelves = [...new Set(books.map((book) => String(book.shelf || '').trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }))
+  const hasUnassignedShelf = books.some((book) => !String(book.shelf || '').trim())
+  const shelfGroups = Array.from(filteredBooks.reduce((groups, book) => {
     const shelf = String(book.shelf || '').trim() || 'Shelf not assigned'
     if (!groups.has(shelf)) groups.set(shelf, [])
     groups.get(shelf).push(book)
@@ -1895,11 +1905,32 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
 
   return (
     <>
-      <PageHeading eyebrow="Manage and import library books" title="Book collection" description={`${books.length} title${books.length === 1 ? '' : 's'} to explore`}>
-        <SearchBox value={search} onChange={setSearch} placeholder="Search title, author, ISBN, shelf…" />
+      <PageHeading eyebrow="Manage and import library books" title="Book collection" description={`${filteredBooks.length} of ${books.length} title${books.length === 1 ? '' : 's'}`}>
+        <SearchBox value={search} onChange={setSearch} placeholder="Filter by book name…" />
         <ActionButton secondary icon={Download} onClick={onExport}>Export CSV</ActionButton>
         <ActionButton onClick={onAdd}>Add a book</ActionButton>
       </PageHeading>
+      <section aria-label="Filter books" className="mb-4 grid gap-3 rounded-2xl border border-[#e9ede7] bg-white p-4 sm:grid-cols-2 xl:grid-cols-4">
+        <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-[#78847c]">
+          Shelf
+          <select aria-label="Filter by shelf" className="rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px] text-[#35483a]" value={shelfFilter} onChange={(event) => setShelfFilter(event.target.value)}>
+            <option value="All">All shelves</option>
+            {shelves.map((shelf) => <option key={shelf} value={shelf}>{shelf}</option>)}
+            {hasUnassignedShelf && <option value="__unassigned__">Shelf not assigned</option>}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-[#78847c]">
+          Delivered from
+          <input aria-label="Filter by delivery start date" type="date" className="rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px] text-[#35483a]" value={deliveryFrom} max={deliveryTo || undefined} onChange={(event) => setDeliveryFrom(event.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-[#78847c]">
+          Delivered to
+          <input aria-label="Filter by delivery end date" type="date" className="rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px] text-[#35483a]" value={deliveryTo} min={deliveryFrom || undefined} onChange={(event) => setDeliveryTo(event.target.value)} />
+        </label>
+        <div className="flex items-end">
+          <button type="button" onClick={() => { setSearch(''); setShelfFilter('All'); setDeliveryFrom(''); setDeliveryTo('') }} className="w-full rounded-lg border border-[#e8ece6] px-3 py-2.5 text-[10px] font-semibold text-[#607667] hover:bg-[#f7f8f5]">Clear filters</button>
+        </div>
+      </section>
       <section className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-[#e9ede7] bg-white p-4">
         <div className="mr-auto"><p className="text-[11px] font-bold">Import books from CSV</p><p className="mt-1 text-[10px] text-[#929d94]">Upload one row per title with copy count, delivery and publication dates, grade, and shelf.</p></div>
         <button onClick={downloadBookTemplate} className="flex items-center gap-1.5 rounded-lg border border-[#e8ece6] px-3 py-2 text-[10px] font-bold text-[#607667] hover:bg-[#f7f8f5]"><Download size={13} /> CSV template</button>
@@ -1918,7 +1949,7 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
             <p className="text-[11px] font-bold">Books by shelf</p>
             <p className="mt-1 text-[10px] text-[#929d94]">See which titles are stored at each shelf location.</p>
           </div>
-          <span className="text-[10px] text-[#78847c]">{shelfGroups.length} {shelfGroups.length === 1 ? 'shelf' : 'shelves'} · {books.length} {books.length === 1 ? 'title' : 'titles'}</span>
+          <span className="text-[10px] text-[#78847c]">{shelfGroups.length} {shelfGroups.length === 1 ? 'shelf' : 'shelves'} · {filteredBooks.length} {filteredBooks.length === 1 ? 'title' : 'titles'}</span>
         </div>
         {shelfGroups.length > 0 ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -1936,7 +1967,11 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
                     <li key={book.id} className="flex min-w-0 items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="break-words text-[10px] font-semibold text-[#35483a]">{book.title}</p>
-                        <p className="mt-0.5 text-[9px] text-[#929d94]">{[book.grade && `Grade ${book.grade}`, book.bookType, book.isbn].filter(Boolean).join(' · ') || book.category || 'Book'}</p>
+                        <p className="mt-0.5 text-[9px] text-[#929d94]">{[book.grade && `Grade ${book.grade}`, book.bookType, book.isbn, book.deliveredOn && `Delivered ${book.deliveredOn}`].filter(Boolean).join(' · ') || book.category || 'Book'}</p>
+                        <div className="mt-1.5 flex gap-1">
+                          <button type="button" disabled={busy} onClick={() => onEdit(book)} aria-label={`Edit ${book.title}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-semibold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50"><Pencil size={11} /> Edit</button>
+                          {canManage && <button type="button" disabled={busy} onClick={() => onDelete(book)} aria-label={`Delete ${book.title}`} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50"><Trash2 size={11} /> Delete</button>}
+                        </div>
                       </div>
                       <span className="shrink-0 pt-0.5 text-[9px] text-[#78847c]">{book.availableCopies} / {book.totalCopies} available</span>
                     </li>
@@ -1954,12 +1989,12 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
           <table className="w-full min-w-[1080px] text-left">
             <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Book</th><th className="px-4 py-3.5">Physical code</th><th className="px-4 py-3.5">Publisher</th><th className="px-4 py-3.5">Grade</th><th className="px-4 py-3.5">Book type</th><th className="px-4 py-3.5">Copies</th><th className="px-4 py-3.5">Delivered</th><th className="px-4 py-3.5">Published</th><th className="px-4 py-3.5">Shelf</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {books.map((book, index) => <tr key={book.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-3"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="max-w-[220px] truncate text-[11px] font-bold">{book.title}</p><p className="mt-1 text-[10px] text-[#8b968d]">{book.author || book.category || 'Book'}</p></div></div></td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.isbn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publisher || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.grade || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.bookType || 'General'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.deliveredOn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publicationYear || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.shelf}</td><td className="px-5 py-3 text-right"><button disabled={busy} onClick={() => onEdit(book)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Edit</button>{canManage && <button disabled={busy} onClick={() => onDelete(book)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button>}</td></tr>)}
-              {books.length === 0 && <EmptyRow colSpan={10} message="No books found. Try another search, import a CSV, or add a title to your collection." />}
+              {filteredBooks.map((book, index) => <tr key={book.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-3"><div className="flex items-center gap-3"><BookCover index={index} /><div><p className="max-w-[220px] truncate text-[11px] font-bold">{book.title}</p><p className="mt-1 text-[10px] text-[#8b968d]">{book.author || book.category || 'Book'}</p></div></div></td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.isbn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publisher || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.grade || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.bookType || 'General'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.availableCopies} / {book.totalCopies}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.deliveredOn || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.publicationYear || '—'}</td><td className="px-4 py-3 text-[10px] text-[#748078]">{book.shelf || '—'}</td><td className="px-5 py-3 text-right"><button disabled={busy} onClick={() => onEdit(book)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Edit</button>{canManage && <button disabled={busy} onClick={() => onDelete(book)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button>}</td></tr>)}
+              {filteredBooks.length === 0 && <EmptyRow colSpan={10} message="No books match these filters. Clear filters or try another name, shelf, or delivery date." />}
             </tbody>
           </table>
         </div>
-        <div className="flex items-center justify-between border-t border-[#edf0eb] px-5 py-3"><span className="text-[10px] text-[#929d94]">Showing {books.length} {books.length === 1 ? 'book' : 'books'}</span><div className="flex gap-1"><button disabled aria-label="Previous page" className="rounded-lg border border-[#edf0eb] p-1.5 text-[#9ca69e] disabled:opacity-50"><ChevronLeft size={14} /></button><button disabled aria-label="Next page" className="rounded-lg border border-[#edf0eb] p-1.5 text-[#9ca69e] disabled:opacity-50"><ChevronRight size={14} /></button></div></div>
+        <div className="flex items-center justify-between border-t border-[#edf0eb] px-5 py-3"><span className="text-[10px] text-[#929d94]">Showing {filteredBooks.length} of {books.length} {books.length === 1 ? 'book' : 'books'}</span><div className="flex gap-1"><button disabled aria-label="Previous page" className="rounded-lg border border-[#edf0eb] p-1.5 text-[#9ca69e] disabled:opacity-50"><ChevronLeft size={14} /></button><button disabled aria-label="Next page" className="rounded-lg border border-[#edf0eb] p-1.5 text-[#9ca69e] disabled:opacity-50"><ChevronRight size={14} /></button></div></div>
       </section>
     </>
   )
