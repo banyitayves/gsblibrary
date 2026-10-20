@@ -148,7 +148,7 @@ function App() {
 
   const filteredBooks = useMemo(() => {
     return books.filter((book) => {
-      const matchesSearch = [book.title, book.author, book.code || book.id, book.category, book.grade, book.type]
+      const matchesSearch = [book.title, book.author, book.code || book.id, book.category, book.grade, book.type, book.location]
         .join(' ')
         .toLowerCase()
         .includes(search.toLowerCase())
@@ -157,6 +157,17 @@ function App() {
       return matchesSearch && matchesStatus
     })
   }, [books, search, statusFilter])
+
+  const shelfGroups = useMemo(() => {
+    const groups = filteredBooks.reduce((shelves, book) => {
+      const location = book.location?.trim() || 'Unassigned shelf'
+      if (!shelves[location]) shelves[location] = []
+      shelves[location].push(book)
+      return shelves
+    }, {})
+
+    return Object.entries(groups).sort(([locationA], [locationB]) => locationA.localeCompare(locationB, undefined, { numeric: true }))
+  }, [filteredBooks])
 
   const handleAddBook = async (event) => {
     event.preventDefault()
@@ -550,7 +561,7 @@ function App() {
             <div className="toolbar-row">
               <input
                 type="text"
-                placeholder="Search title, author, ID..."
+                placeholder="Search title, author, ID, shelf..."
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
@@ -563,6 +574,43 @@ function App() {
                 <option value="In Library">In Library</option>
               </select>
             </div>
+
+            <section className="shelf-browser" aria-label="Books by shelf">
+              <div className="shelf-browser-header">
+                <div>
+                  <h3>Books by shelf</h3>
+                  <p>Books are grouped by their catalog location.</p>
+                </div>
+                <span>{filteredBooks.length} {filteredBooks.length === 1 ? 'book' : 'books'}</span>
+              </div>
+              {shelfGroups.length > 0 ? (
+                <div className="shelf-grid">
+                  {shelfGroups.map(([location, shelfBooks]) => (
+                    <article className="shelf-card" key={location}>
+                      <div className="shelf-card-header">
+                        <h4>{location}</h4>
+                        <span>{shelfBooks.length} {shelfBooks.length === 1 ? 'book' : 'books'}</span>
+                      </div>
+                      <ul className="shelf-book-list">
+                        {shelfBooks.map((book) => (
+                          <li className="shelf-book" key={book.id}>
+                            <div className="shelf-book-copy">
+                              <strong>{book.title}</strong>
+                              <small>{book.code || book.id} · {book.author || 'Unknown author'}</small>
+                            </div>
+                            <span className={`status-pill ${book.status.toLowerCase().replace(/\s+/g, '-')}`}>
+                              {book.status}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="shelf-empty-state">No books match your current search or status filter.</p>
+              )}
+            </section>
 
             <div className="table-wrap">
               <table>

@@ -14,6 +14,7 @@ A full-stack library operations dashboard using React + Vite on the frontend and
 - Dynamic dashboard and analytics
 - Audit logs and activity history
 - Search and advanced filtering for catalog records
+- Shelf-by-shelf catalog view grouped by each book's location
 - Shared physical book codes across different titles, grades, or book types while blocking exact catalog duplicates
 - Import from CSV/XLSX files
 - Export reports as CSV, Excel, and PDF
