@@ -44,8 +44,7 @@ async function latestOverdueLoanId(connection, memberId) {
   const [[row]] = await connection.execute(
     `SELECT COALESCE(MAX(id), 0) AS latestOverdueLoanId
      FROM loans
-     WHERE member_id = ? AND quantity > returned_quantity + missed_quantity
-       AND due_date < CURRENT_DATE()`,
+     WHERE member_id = ? AND due_date < CURRENT_DATE()`,
     [memberId],
   )
   return row.latestOverdueLoanId
@@ -753,8 +752,7 @@ app.get('/api/members', ...staff, asyncRoute(async (req, res) => {
            AND l.due_date < CURRENT_DATE()) AS overdueLoanCount,
        (m.member_type = 'Student' AND COALESCE((
          SELECT MAX(l.id) FROM loans l
-         WHERE l.member_id = m.id AND l.quantity > l.returned_quantity + l.missed_quantity
-           AND l.due_date < CURRENT_DATE()
+         WHERE l.member_id = m.id AND l.due_date < CURRENT_DATE()
        ), 0) > COALESCE(m.overdue_unblocked_through_loan_id, 0)) AS overdueBlocked
      FROM members m
      WHERE m.name LIKE ? OR m.email LIKE ? OR m.phone LIKE ? OR m.membership_number LIKE ? OR m.class_section LIKE ?
@@ -1630,9 +1628,10 @@ app.post('/api/library-visits', ...canManage, asyncRoute(async (req, res) => {
       await connection.rollback()
       return res.status(404).json({ error: 'Active library member not found.' })
     }
-    if (member.memberType === 'Student' && BigInt(await latestOverdueLoanId(connection, memberId)) > 0n) {
+    if (member.memberType === 'Student'
+      && isOverdueBlocked(member, await latestOverdueLoanId(connection, memberId))) {
       await connection.rollback()
-      return res.status(409).json({ error: 'This student cannot attend the library while they have an overdue book. Return the overdue book first.' })
+      return res.status(409).json({ error: 'This student is blocked from the library because they have an overdue book. Return the overdue book or unblock the student first.' })
     }
     let book = null
     if (bookId !== null) {
