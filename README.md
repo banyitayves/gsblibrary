@@ -181,6 +181,8 @@ Before deploying school-directory or book catalog changes to an existing databas
 npm.cmd run db:migrate:directory
 ```
 
+The API also safely adds the nullable overdue-unblock field if it is missing, before handling requests. This does not replace the migration command for the other existing-database changes listed below.
+
 It makes member email optional, adds member type, class, phone, photo, and overdue-unblock fields/indexes, adds the optional copy code and missed-book/quantity tracking to loan records, creates the library attendance and password-reset token tables, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
 For a deployed Vercel database, an authenticated Librarian or Administrator can apply the same idempotent migration with `POST /api/admin/migrations/school-directory` and a Bearer token.
 

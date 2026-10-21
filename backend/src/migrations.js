@@ -7,6 +7,28 @@ const directoryColumns = [
   ['overdue_unblocked_through_loan_id', 'BIGINT UNSIGNED NULL'],
 ]
 
+export async function ensureOverdueUnblockColumn(connection) {
+  const [columns] = await connection.execute(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'members'
+       AND COLUMN_NAME = 'overdue_unblocked_through_loan_id'`,
+  )
+  if (columns.length) return
+
+  try {
+    await connection.query(
+      'ALTER TABLE members ADD COLUMN overdue_unblocked_through_loan_id BIGINT UNSIGNED NULL',
+    )
+  } catch (error) {
+    const [updatedColumns] = await connection.execute(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'members'
+         AND COLUMN_NAME = 'overdue_unblocked_through_loan_id'`,
+    )
+    if (!updatedColumns.length) throw error
+  }
+}
+
 export async function migrateSchoolDirectory(connection) {
   await connection.query(
     `CREATE TABLE IF NOT EXISTS library_visits (

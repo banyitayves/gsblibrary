@@ -8,7 +8,7 @@ import { config, isSmtpConfigured, requireJwtSecret } from './config.js'
 import { authenticate, allowRoles } from './auth.js'
 import { pool } from './db.js'
 import { csvDocument, parseCsv } from './csv.js'
-import { migratePasswordResetTokens, migrateSchoolDirectory } from './migrations.js'
+import { ensureOverdueUnblockColumn, migratePasswordResetTokens, migrateSchoolDirectory } from './migrations.js'
 import { sendEmail } from './email.js'
 
 const app = express()
@@ -85,6 +85,29 @@ app.use(express.text({ type: 'text/csv', limit: '5mb' }))
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
 }
+
+let overdueUnblockSchemaPromise
+async function ensureOverdueUnblockSchema() {
+  if (!overdueUnblockSchemaPromise) {
+    overdueUnblockSchemaPromise = (async () => {
+      const connection = await pool.getConnection()
+      try {
+        await ensureOverdueUnblockColumn(connection)
+      } finally {
+        connection.release()
+      }
+    })().catch((error) => {
+      overdueUnblockSchemaPromise = null
+      throw error
+    })
+  }
+  return overdueUnblockSchemaPromise
+}
+
+app.use(asyncRoute(async (_req, _res, next) => {
+  await ensureOverdueUnblockSchema()
+  next()
+}))
 
 function audit(connection, actor, action, details) {
   return connection.execute(
