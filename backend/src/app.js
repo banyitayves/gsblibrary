@@ -40,6 +40,39 @@ function isValidIsoDate(date) {
     && new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date
 }
 
+async function latestOverdueLoanId(connection, memberId) {
+  const [[row]] = await connection.execute(
+    `SELECT COALESCE(MAX(id), 0) AS latestOverdueLoanId
+     FROM loans
+     WHERE member_id = ? AND quantity > returned_quantity + missed_quantity
+       AND due_date < CURRENT_DATE()`,
+    [memberId],
+  )
+  return row.latestOverdueLoanId
+}
+
+async function checkoutLoanCount(connection, member) {
+  const [[row]] = await connection.execute(
+    `SELECT COALESCE(SUM(
+       CASE WHEN ? = 'Student'
+          AND id <= COALESCE(?, 0)
+          AND due_date < CURRENT_DATE()
+         THEN 0
+         ELSE quantity - returned_quantity - missed_quantity
+       END
+     ), 0) AS activeLoans
+     FROM loans
+     WHERE member_id = ? AND quantity > returned_quantity + missed_quantity`,
+    [member.memberType, member.overdueUnblockedThroughLoanId, member.id],
+  )
+  return Number(row.activeLoans)
+}
+
+function isOverdueBlocked(member, latestLoanId) {
+  return member.memberType === 'Student'
+    && BigInt(latestLoanId || 0) > BigInt(member.overdueUnblockedThroughLoanId || 0)
+}
+
 app.use(helmet())
 app.use(cors({
   origin(origin, callback) {
@@ -683,7 +716,23 @@ app.get('/api/members', ...staff, asyncRoute(async (req, res) => {
        (m.photo_data IS NOT NULL) AS hasPhoto,
        DATE_FORMAT(m.joined_at, '%Y-%m-%d') AS joinedAt,
        (SELECT COALESCE(SUM(l.quantity - l.returned_quantity - l.missed_quantity), 0) FROM loans l WHERE l.member_id = m.id AND l.quantity > l.returned_quantity + l.missed_quantity) AS activeLoans,
-       (SELECT COALESCE(SUM(l.quantity), 0) FROM loans l WHERE l.member_id = m.id) AS totalLoans
+       (SELECT COALESCE(SUM(
+         CASE WHEN m.member_type = 'Student'
+             AND l.id <= COALESCE(m.overdue_unblocked_through_loan_id, 0)
+             AND l.due_date < CURRENT_DATE()
+           THEN 0
+           ELSE l.quantity - l.returned_quantity - l.missed_quantity
+         END
+       ), 0) FROM loans l WHERE l.member_id = m.id AND l.quantity > l.returned_quantity + l.missed_quantity) AS checkoutActiveLoans,
+       (SELECT COALESCE(SUM(l.quantity), 0) FROM loans l WHERE l.member_id = m.id) AS totalLoans,
+       (SELECT COALESCE(SUM(l.quantity - l.returned_quantity - l.missed_quantity), 0) FROM loans l
+         WHERE l.member_id = m.id AND l.quantity > l.returned_quantity + l.missed_quantity
+           AND l.due_date < CURRENT_DATE()) AS overdueLoanCount,
+       (m.member_type = 'Student' AND COALESCE((
+         SELECT MAX(l.id) FROM loans l
+         WHERE l.member_id = m.id AND l.quantity > l.returned_quantity + l.missed_quantity
+           AND l.due_date < CURRENT_DATE()
+       ), 0) > COALESCE(m.overdue_unblocked_through_loan_id, 0)) AS overdueBlocked
      FROM members m
      WHERE m.name LIKE ? OR m.email LIKE ? OR m.phone LIKE ? OR m.membership_number LIKE ? OR m.class_section LIKE ?
      ORDER BY name`,
@@ -694,8 +743,55 @@ app.get('/api/members', ...staff, asyncRoute(async (req, res) => {
     id: Number(member.id),
     hasPhoto: Boolean(Number(member.hasPhoto)),
     activeLoans: Number(member.activeLoans),
+    checkoutActiveLoans: Number(member.checkoutActiveLoans),
     totalLoans: Number(member.totalLoans),
+    overdueLoanCount: Number(member.overdueLoanCount),
+    overdueBlocked: Boolean(Number(member.overdueBlocked)),
   })))
+}))
+
+app.post('/api/members/:id/unblock-overdue', ...canManage, asyncRoute(async (req, res) => {
+  const memberId = Number(req.params.id)
+  if (!Number.isSafeInteger(memberId) || memberId < 1) {
+    return res.status(400).json({ error: 'Member ID must be a positive integer.' })
+  }
+
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[member]] = await connection.execute(
+      `SELECT id, name, member_type AS memberType,
+         overdue_unblocked_through_loan_id AS overdueUnblockedThroughLoanId
+       FROM members WHERE id = ? FOR UPDATE`,
+      [memberId],
+    )
+    if (!member) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Member not found.' })
+    }
+    if (member.memberType !== 'Student') {
+      await connection.rollback()
+      return res.status(409).json({ error: 'Only students can be blocked for overdue books.' })
+    }
+
+    const overdueLoanId = await latestOverdueLoanId(connection, memberId)
+    if (!isOverdueBlocked(member, overdueLoanId)) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'This student is not currently blocked for overdue books.' })
+    }
+    await connection.execute(
+      'UPDATE members SET overdue_unblocked_through_loan_id = ? WHERE id = ?',
+      [overdueLoanId, memberId],
+    )
+    await audit(connection, req.user.name, 'Student unblocked for overdue books', `Unblocked ${member.name} from the overdue-book checkout and attendance restriction`)
+    await connection.commit()
+    res.json({ id: memberId, overdueBlocked: false, message: `${member.name} was unblocked. A new overdue loan will block the student again.` })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
 }))
 
 app.get('/api/members/:id/photo', ...staff, asyncRoute(async (req, res) => {
@@ -1202,26 +1298,30 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
       return res.status(409).json({ error: `Only ${book.available_copies} ${Number(book.available_copies) === 1 ? 'copy is' : 'copies are'} available.` })
     }
     const [[member]] = await connection.execute(
-      'SELECT id, name, email, member_type AS memberType FROM members WHERE id = ? AND status = ? FOR UPDATE',
+      `SELECT id, name, email, member_type AS memberType,
+         overdue_unblocked_through_loan_id AS overdueUnblockedThroughLoanId
+       FROM members WHERE id = ? AND status = ? FOR UPDATE`,
       [memberId, 'Active'],
     )
     if (!member) {
       await connection.rollback()
       return res.status(404).json({ error: 'Active member not found.' })
     }
+    if (member.memberType === 'Student'
+      && isOverdueBlocked(member, await latestOverdueLoanId(connection, memberId))) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'This student is blocked from borrowing because they have an overdue book. Return the overdue book or unblock the student first.' })
+    }
     if (member.memberType === 'Student' && quantity !== 1) {
       await connection.rollback()
       return res.status(400).json({ error: 'Students may check out only one book at a time.' })
     }
     const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 1
-    const [[loanCount]] = await connection.execute(
-      'SELECT COALESCE(SUM(quantity - returned_quantity - missed_quantity), 0) AS activeLoans FROM loans WHERE member_id = ? AND quantity > returned_quantity + missed_quantity',
-      [memberId],
-    )
-    if (Number(loanCount.activeLoans) + quantity > maximumActiveLoans) {
+    const activeLoans = await checkoutLoanCount(connection, member)
+    if (activeLoans + quantity > maximumActiveLoans) {
       await connection.rollback()
       return res.status(409).json({
-        error: `${member.memberType}s may have at most ${maximumActiveLoans} active book${maximumActiveLoans === 1 ? '' : 's'} at a time; this member has ${loanCount.activeLoans} active book${Number(loanCount.activeLoans) === 1 ? '' : 's'}.`,
+        error: `${member.memberType}s may have at most ${maximumActiveLoans} active book${maximumActiveLoans === 1 ? '' : 's'} at a time; this member has ${activeLoans} eligible active book${activeLoans === 1 ? '' : 's'}.`,
       })
     }
 
@@ -1303,27 +1403,31 @@ app.post('/api/loans/batch', ...canManage, asyncRoute(async (req, res) => {
   try {
     await connection.beginTransaction()
     const [[member]] = await connection.execute(
-      'SELECT id, name, member_type AS memberType FROM members WHERE id = ? AND status = ? FOR UPDATE',
+      `SELECT id, name, member_type AS memberType,
+         overdue_unblocked_through_loan_id AS overdueUnblockedThroughLoanId
+       FROM members WHERE id = ? AND status = ? FOR UPDATE`,
       [memberId, 'Active'],
     )
     if (!member) {
       await connection.rollback()
       return res.status(404).json({ error: 'Active member not found.' })
     }
+    if (member.memberType === 'Student'
+      && isOverdueBlocked(member, await latestOverdueLoanId(connection, memberId))) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'This student is blocked from borrowing because they have an overdue book. Return the overdue book or unblock the student first.' })
+    }
     if (member.memberType === 'Student' && (normalizedItems.length !== 1 || totalQuantity !== 1)) {
       await connection.rollback()
       return res.status(400).json({ error: 'Students may check out only one book at a time.' })
     }
 
-    const [[loanCount]] = await connection.execute(
-      'SELECT COALESCE(SUM(quantity - returned_quantity - missed_quantity), 0) AS activeLoans FROM loans WHERE member_id = ? AND quantity > returned_quantity + missed_quantity',
-      [memberId],
-    )
+    const activeLoans = await checkoutLoanCount(connection, member)
     const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 1
-    if (Number(loanCount.activeLoans) + totalQuantity > maximumActiveLoans) {
+    if (activeLoans + totalQuantity > maximumActiveLoans) {
       await connection.rollback()
       return res.status(409).json({
-        error: `${member.memberType}s may have at most ${maximumActiveLoans} active book${maximumActiveLoans === 1 ? '' : 's'} at a time; this member has ${loanCount.activeLoans} active book${Number(loanCount.activeLoans) === 1 ? '' : 's'}.`,
+        error: `${member.memberType}s may have at most ${maximumActiveLoans} active book${maximumActiveLoans === 1 ? '' : 's'} at a time; this member has ${activeLoans} eligible active book${activeLoans === 1 ? '' : 's'}.`,
       })
     }
 
@@ -1494,12 +1598,18 @@ app.post('/api/library-visits', ...canManage, asyncRoute(async (req, res) => {
   try {
     await connection.beginTransaction()
     const [[member]] = await connection.execute(
-      'SELECT id, name FROM members WHERE id = ? AND status = ? FOR UPDATE',
+      `SELECT id, name, member_type AS memberType,
+         overdue_unblocked_through_loan_id AS overdueUnblockedThroughLoanId
+       FROM members WHERE id = ? AND status = ? FOR UPDATE`,
       [memberId, 'Active'],
     )
     if (!member) {
       await connection.rollback()
       return res.status(404).json({ error: 'Active library member not found.' })
+    }
+    if (member.memberType === 'Student' && BigInt(await latestOverdueLoanId(connection, memberId)) > 0n) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'This student cannot attend the library while they have an overdue book. Return the overdue book first.' })
     }
     let book = null
     if (bookId !== null) {

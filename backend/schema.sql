@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS members (
   photo_mime_type VARCHAR(32) NULL,
   photo_data MEDIUMBLOB NULL,
   status ENUM('Active', 'Suspended') NOT NULL DEFAULT 'Active',
+  overdue_unblocked_through_loan_id BIGINT UNSIGNED NULL,
   joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_members_name (name),
   INDEX idx_members_class_section (class_section),

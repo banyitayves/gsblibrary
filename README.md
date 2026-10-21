@@ -141,7 +141,7 @@ In **Reports**, choose and generate loan activity, overdue loans, returned-loan 
 
 ### Library attendance
 
-Open **Library attendance** to record each student or teacher entering the library and optionally note the book they are reading. Search by name, class, or membership number to select a visitor; search by title, ISBN, author, or shelf to select a book. Search the selected day's visit register by visitor name, membership number, class, or reading title. This is an attendance record, not a checkout, so it does not change book availability or loan limits. The page lists visits by selected date, summarizes today and the last 30 days, ranks frequent visitors, and shows the most-recorded reading books. Download the daily register as a CSV file.
+Open **Library attendance** to record each student or teacher entering the library and optionally note the book they are reading. Students with any overdue copies cannot be checked in until the overdue books are returned; this attendance restriction still applies even if staff manually unblock the student for borrowing. Search by name, class, or membership number to select a visitor; search by title, ISBN, author, or shelf to select a book. Search the selected day's visit register by visitor name, membership number, class, or reading title. This is an attendance record, not a checkout, so it does not change book availability or loan limits. The page lists visits by selected date, summarizes today and the last 30 days, ranks frequent visitors, and shows the most-recorded reading books. Download the daily register as a CSV file.
 
 ### Book catalog CSV files
 
@@ -155,7 +155,7 @@ The title and total copy count are required. ISBN, publisher, author, delivery d
 
 The header includes a sun/moon button to switch between light and dark themes. Your choice is saved in this browser.
 
-At checkout, each student may have at most **1 active book** at a time. Teachers can check out multiple titles and quantities in one checkout, up to **300 active copies** across all titles (for example, 30 Kinyarwanda and 2 Biology books). When recording a return, enter how many copies are available again and how many are missing. Any copies not included in either quantity remain outstanding. Returned copies increase available inventory; missing copies reduce total inventory.
+At checkout, each student may have at most **1 active book** at a time. A student with an overdue book is automatically blocked from borrowing again; a Librarian or Administrator can use **Students & teachers → Unblock** to allow borrowing despite the current overdue loan. A later loan becoming overdue blocks the student again. Teachers can check out multiple titles and quantities in one checkout, up to **300 active copies** across all titles (for example, 30 Kinyarwanda and 2 Biology books). When recording a return, enter how many copies are available again and how many are missing. Any copies not included in either quantity remain outstanding. Returned copies increase available inventory; missing copies reduce total inventory.
 
 If checked-out copies are lost, use **Loans & returns → Mark missed** and enter their quantity in the return dialog's **Copies missing** field. This reduces the book title's total inventory by that number without increasing available copies and records who had them. Missed copies appear in the **Missed books** report and can be filtered by name, class, book, and date, then downloaded as CSV, PDF, or Excel. Loan lists and reports show quantities issued, returned, missed, and still outstanding.
 
@@ -181,7 +181,7 @@ Before deploying school-directory or book catalog changes to an existing databas
 npm.cmd run db:migrate:directory
 ```
 
-It makes member email optional, adds member type, class, and phone fields/indexes, adds the optional copy code and missed-book/quantity tracking to loan records, creates the library attendance and password-reset token tables, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
+It makes member email optional, adds member type, class, phone, photo, and overdue-unblock fields/indexes, adds the optional copy code and missed-book/quantity tracking to loan records, creates the library attendance and password-reset token tables, and sets the librarian display name to `NSHIMIYIMANA Yves`. It does not change account passwords or remove library data. Run it successfully before deploying the new API version.
 For a deployed Vercel database, an authenticated Librarian or Administrator can apply the same idempotent migration with `POST /api/admin/migrations/school-directory` and a Bearer token.
 
 ## Other commands

@@ -4,6 +4,7 @@ const directoryColumns = [
   ['class_section', 'VARCHAR(20) NULL'],
   ['photo_mime_type', 'VARCHAR(32) NULL'],
   ['photo_data', 'MEDIUMBLOB NULL'],
+  ['overdue_unblocked_through_loan_id', 'BIGINT UNSIGNED NULL'],
 ]
 
 export async function migrateSchoolDirectory(connection) {

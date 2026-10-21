@@ -501,6 +501,19 @@ function App() {
     }
   }
 
+  async function unblockOverdueMember(member) {
+    setBusy(true)
+    try {
+      const result = await api(`/members/${member.id}/unblock-overdue`, { method: 'POST' })
+      notify(result.message)
+      await loadData()
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function issueLoan(event) {
     event.preventDefault()
     const items = loanForm.items.map((item) => ({
@@ -510,6 +523,10 @@ function App() {
     }))
     if (!loanForm.memberId || items.some((item) => !item.bookId || !Number.isInteger(item.quantity) || item.quantity < 1)) {
       notify('Choose a book and an active student or teacher from the suggestions.')
+      return
+    }
+    if (selectedLoanMember?.overdueBlocked) {
+      notify('This student is blocked from borrowing because they have an overdue book.')
       return
     }
     if (selectedLoanMember?.memberType === 'Student' && (items.length !== 1 || items[0].quantity !== 1)) {
@@ -884,7 +901,9 @@ function App() {
     total + (item.bookId ? Number(item.quantity) || 0 : 0)
   ), 0)
   const selectedMemberLimit = selectedLoanMember?.memberType === 'Teacher' ? 300 : 1
-  const selectedMemberRemaining = selectedLoanMember ? selectedMemberLimit - Number(selectedLoanMember.activeLoans || 0) : 1
+  const selectedMemberRemaining = selectedLoanMember
+    ? selectedMemberLimit - Number(selectedLoanMember.checkoutActiveLoans ?? selectedLoanMember.activeLoans ?? 0)
+    : 1
   const canAddLoanItem = selectedLoanMember?.memberType === 'Teacher'
     && selectedMemberRemaining > selectedLoanQuantity
     && loanForm.items.length < availableBooks.length
@@ -1029,6 +1048,7 @@ function App() {
                 setModal({ type: 'member', member })
               }}
               onDelete={deleteMember}
+              onUnblock={unblockOverdueMember}
               canManage={canManageLibraryData}
             />
           )}
@@ -1200,10 +1220,11 @@ function App() {
         <Modal title="Check out a book" subtitle="Choose a member and an available title." onClose={() => setModal(null)}>
           {availableBooks.length === 0 || members.every((member) => {
             const limit = member.memberType === 'Teacher' ? 300 : 1
-            return member.status !== 'Active' || Number(member.activeLoans || 0) >= limit
+            return member.status !== 'Active' || member.overdueBlocked
+              || Number(member.checkoutActiveLoans ?? member.activeLoans ?? 0) >= limit
           }) ? (
             <div className="rounded-xl bg-[#f7f8f5] p-4 text-sm leading-relaxed text-[#748078]">
-              {availableBooks.length === 0 ? 'There are no available copies right now.' : 'No active student or teacher is currently below their checkout limit.'}
+              {availableBooks.length === 0 ? 'There are no available copies right now.' : 'No active student or teacher is currently eligible to check out a book. Students with overdue books are blocked until a librarian unblocks them.'}
             </div>
           ) : (
             <form className="space-y-4" onSubmit={issueLoan}>
@@ -1218,9 +1239,9 @@ function App() {
                     const memberSearch = event.target.value
                     const member = members.find((item) => {
                       const limit = item.memberType === 'Teacher' ? 300 : 1
-                      return item.status === 'Active'
-                        && `${item.name} · ${item.memberType}${item.classSection ? ` · ${item.classSection}` : ''} · ${item.membershipNumber} · ${item.activeLoans || 0}/${limit} copies` === memberSearch
-                        && Number(item.activeLoans || 0) < limit
+                      return item.status === 'Active' && !item.overdueBlocked
+                        && `${item.name} · ${item.memberType}${item.classSection ? ` · ${item.classSection}` : ''} · ${item.membershipNumber} · ${item.checkoutActiveLoans ?? item.activeLoans ?? 0}/${limit} copies` === memberSearch
+                        && Number(item.checkoutActiveLoans ?? item.activeLoans ?? 0) < limit
                     })
                     setLoanForm({
                       ...loanForm,
@@ -1235,10 +1256,11 @@ function App() {
                 <datalist id="checkout-members">
                   {members.filter((member) => {
                     const limit = member.memberType === 'Teacher' ? 300 : 1
-                    return member.status === 'Active' && Number(member.activeLoans || 0) < limit
+                    return member.status === 'Active' && !member.overdueBlocked
+                      && Number(member.checkoutActiveLoans ?? member.activeLoans ?? 0) < limit
                   }).map((member) => {
                     const limit = member.memberType === 'Teacher' ? 300 : 1
-                    return <option key={member.id} value={`${member.name} · ${member.memberType}${member.classSection ? ` · ${member.classSection}` : ''} · ${member.membershipNumber} · ${member.activeLoans || 0}/${limit} copies`} />
+                    return <option key={member.id} value={`${member.name} · ${member.memberType}${member.classSection ? ` · ${member.classSection}` : ''} · ${member.membershipNumber} · ${member.checkoutActiveLoans ?? member.activeLoans ?? 0}/${limit} copies`} />
                   })}
                 </datalist>
               </Field>
@@ -1944,7 +1966,7 @@ function Catalog({ books, search, setSearch, importResult, busy, onImport, onAdd
   )
 }
 
-function Members({ members, search, setSearch, typeFilter, setTypeFilter, classFilter, setClassFilter, importResult, busy, onImport, onExport, onAdd, onEdit, onDelete, canManage }) {
+function Members({ members, search, setSearch, typeFilter, setTypeFilter, classFilter, setClassFilter, importResult, busy, onImport, onExport, onAdd, onEdit, onDelete, onUnblock, canManage }) {
   return (
     <>
       <PageHeading eyebrow="GS Busanza school directory" title="Students & teachers" description={`${members.length} people match your directory filters`}>
@@ -1977,7 +1999,15 @@ function Members({ members, search, setSearch, typeFilter, setTypeFilter, classF
           <table className="w-full min-w-[900px] text-left">
             <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Student or teacher</th><th className="px-4 py-3.5">Type / class</th><th className="px-4 py-3.5">Membership no.</th><th className="px-4 py-3.5">Email</th><th className="px-4 py-3.5">Books out</th><th className="px-4 py-3.5">Status</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
-              {members.map((member) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]"><td className="px-5 py-4"><div className="flex items-center gap-3"><MemberPhoto memberId={member.id} hasPhoto={Boolean(member.hasPhoto)} name={member.name} size="size-11" deferLoad /><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td><td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td><td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}<p className="mt-1 text-[9px] text-[#929d94]">{member.phone || 'No phone provided'}</p></td><td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span></td><td className="px-5 py-4 text-right">{canManage && <><button disabled={busy} onClick={() => onEdit(member)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Edit</button><button disabled={busy} onClick={() => onDelete(member)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button></>}</td></tr>)}
+              {members.map((member) => <tr key={member.id} className="transition hover:bg-[#fcfdfa]">
+                <td className="px-5 py-4"><div className="flex items-center gap-3"><MemberPhoto memberId={member.id} hasPhoto={Boolean(member.hasPhoto)} name={member.name} size="size-11" deferLoad /><div><p className="text-[11px] font-bold">{member.name}</p><p className="mt-1 text-[9px] text-[#99a29b]">{member.joinedAt ? `Joined ${member.joinedAt}` : 'School member'}</p></div></div></td>
+                <td className="px-4 py-4"><span className="text-[10px] font-semibold">{member.memberType}</span><p className="mt-1 text-[9px] text-[#929d94]">{member.classSection || '—'}</p></td>
+                <td className="px-4 py-4 text-[10px] text-[#748078]">{member.membershipNumber}</td>
+                <td className="px-4 py-4 text-[10px] text-[#748078]">{member.email || '—'}<p className="mt-1 text-[9px] text-[#929d94]">{member.phone || 'No phone provided'}</p></td>
+                <td className="px-4 py-4"><span className={`text-[10px] font-bold ${member.activeLoans ? 'text-[#a86b4d]' : 'text-[#748078]'}`}>{member.activeLoans || 0}</span><span className="ml-1 text-[9px] text-[#929d94]">active · {member.totalLoans || 0} total</span></td>
+                <td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${member.status === 'Active' ? 'bg-[#edf4ed] text-[#66826b]' : 'bg-[#f8eee9] text-[#ad755d]'}`}>{member.status}</span>{member.overdueBlocked && <p className="mt-1 text-[9px] font-bold text-[#ad5947]">Borrowing blocked</p>}{member.overdueLoanCount > 0 && <p className="mt-1 text-[9px] font-semibold text-[#ad755d]">{member.overdueLoanCount} overdue {member.overdueLoanCount === 1 ? 'copy' : 'copies'}</p>}</td>
+                <td className="px-5 py-4 text-right">{canManage && <><button disabled={busy} onClick={() => onEdit(member)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Edit</button>{member.overdueBlocked && <button disabled={busy} onClick={() => onUnblock(member)} className="ml-1 rounded-lg bg-[#edf4ed] px-2.5 py-1.5 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Unblock</button>}<button disabled={busy} onClick={() => onDelete(member)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button></>}</td>
+              </tr>)}
               {members.length === 0 && <EmptyRow colSpan={7} message="No students or teachers match these filters. Import a CSV or add a person." />}
             </tbody>
           </table>
@@ -2074,7 +2104,13 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
 }
 
 function LibraryAttendance({ members, books, visits, summary, date, setDate, form, setForm, attendanceSearch, setAttendanceSearch, busy, onRecord, onExport }) {
-  const activeMembers = members.filter((member) => member.status === 'Active')
+  const activeMembers = members.filter((member) => (
+    member.status === 'Active'
+    && !(member.memberType === 'Student' && Number(member.overdueLoanCount) > 0)
+  ))
+  const blockedStudents = members.filter((member) => (
+    member.memberType === 'Student' && Number(member.overdueLoanCount) > 0
+  ))
   const memberOptions = activeMembers.map((member) => ({
     id: String(member.id),
     label: `${member.name} · ${member.memberType}${member.classSection ? ` · ${member.classSection}` : ''} · ${member.membershipNumber}`,
@@ -2116,7 +2152,7 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
         ].map(([label, value]) => <article key={label} className="rounded-2xl border border-[#e9ede7] bg-white p-4"><p className="text-[10px] font-semibold text-[#7c887f]">{label}</p><p className="mt-2 text-2xl font-bold">{typeof value === 'number' ? value.toLocaleString() : value}</p></article>)}
       </section>
       <section className="mb-5 rounded-2xl border border-[#e9ede7] bg-white p-5">
-        <div className="mb-4"><h3 className="text-sm font-bold">Check in a library visitor</h3><p className="mt-1 text-[10px] text-[#929d94]">This records attendance and reading activity only; it does not check a book out.</p></div>
+        <div className="mb-4"><h3 className="text-sm font-bold">Check in a library visitor</h3><p className="mt-1 text-[10px] text-[#929d94]">This records attendance and reading activity only; it does not check a book out. Students with overdue books cannot be checked in{blockedStudents.length ? ` (${blockedStudents.length} currently have overdue books)` : ''}.</p></div>
         <form className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[1.3fr_1.3fr_1fr_auto]" onSubmit={onRecord}>
           <Field label="Student or teacher">
             <input required list="attendance-members" autoComplete="off" placeholder="Search student or teacher…" value={form.memberSearch} onChange={(event) => updateSearch('memberSearch', memberOptions, event.target.value)} />
