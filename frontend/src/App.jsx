@@ -182,6 +182,12 @@ function checkoutBookLabel(book) {
   return `${book.title} · ${book.category || 'Uncategorized'} · Grade ${book.grade || 'not recorded'} · ${book.bookType || 'General'} · ${book.isbn || 'No ISBN'} · ${book.author || 'No author'} · ${book.shelf || 'No shelf'} · ${book.availableCopies} available`
 }
 
+function checkoutMemberLabel(member) {
+  const limit = member.memberType === 'Teacher' ? 300 : 1
+  const status = member.overdueBlocked ? ' · BLOCKED — unblock required' : ''
+  return `${member.name} · ${member.memberType}${member.classSection ? ` · ${member.classSection}` : ''} · ${member.membershipNumber} · ${member.checkoutActiveLoans ?? member.activeLoans ?? 0}/${limit} copies${status}`
+}
+
 async function prepareMemberPhoto(file) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
     throw new Error('Choose a JPEG, PNG, or WebP photo.')
@@ -1220,8 +1226,8 @@ function App() {
         <Modal title="Check out a book" subtitle="Choose a member and an available title." onClose={() => setModal(null)}>
           {availableBooks.length === 0 || members.every((member) => {
             const limit = member.memberType === 'Teacher' ? 300 : 1
-            return member.status !== 'Active' || member.overdueBlocked
-              || Number(member.checkoutActiveLoans ?? member.activeLoans ?? 0) >= limit
+            return member.status !== 'Active'
+              || (!member.overdueBlocked && Number(member.checkoutActiveLoans ?? member.activeLoans ?? 0) >= limit)
           }) ? (
             <div className="rounded-xl bg-[#f7f8f5] p-4 text-sm leading-relaxed text-[#748078]">
               {availableBooks.length === 0 ? 'There are no available copies right now.' : 'No active student or teacher is currently eligible to check out a book. Students with overdue books are blocked until a librarian unblocks them.'}
@@ -1239,9 +1245,9 @@ function App() {
                     const memberSearch = event.target.value
                     const member = members.find((item) => {
                       const limit = item.memberType === 'Teacher' ? 300 : 1
-                      return item.status === 'Active' && !item.overdueBlocked
-                        && `${item.name} · ${item.memberType}${item.classSection ? ` · ${item.classSection}` : ''} · ${item.membershipNumber} · ${item.checkoutActiveLoans ?? item.activeLoans ?? 0}/${limit} copies` === memberSearch
-                        && Number(item.checkoutActiveLoans ?? item.activeLoans ?? 0) < limit
+                      return item.status === 'Active'
+                        && checkoutMemberLabel(item) === memberSearch
+                        && (item.overdueBlocked || Number(item.checkoutActiveLoans ?? item.activeLoans ?? 0) < limit)
                     })
                     setLoanForm({
                       ...loanForm,
@@ -1256,11 +1262,10 @@ function App() {
                 <datalist id="checkout-members">
                   {members.filter((member) => {
                     const limit = member.memberType === 'Teacher' ? 300 : 1
-                    return member.status === 'Active' && !member.overdueBlocked
-                      && Number(member.checkoutActiveLoans ?? member.activeLoans ?? 0) < limit
+                    return member.status === 'Active'
+                      && (member.overdueBlocked || Number(member.checkoutActiveLoans ?? member.activeLoans ?? 0) < limit)
                   }).map((member) => {
-                    const limit = member.memberType === 'Teacher' ? 300 : 1
-                    return <option key={member.id} value={`${member.name} · ${member.memberType}${member.classSection ? ` · ${member.classSection}` : ''} · ${member.membershipNumber} · ${member.checkoutActiveLoans ?? member.activeLoans ?? 0}/${limit} copies`} />
+                    return <option key={member.id} value={checkoutMemberLabel(member)} />
                   })}
                 </datalist>
               </Field>
@@ -1277,9 +1282,13 @@ function App() {
                     <p className="mt-1 text-[10px] text-[#607667]">
                       {selectedLoanMember.memberType}{selectedLoanMember.classSection ? ` · ${selectedLoanMember.classSection}` : ''} · {selectedLoanMember.membershipNumber}
                     </p>
-                    <p className="mt-1 text-[10px] text-[#748078]">
+                    {selectedLoanMember.overdueBlocked ? (
+                      <p className="mt-1 text-[10px] font-bold text-[#ad5947]">
+                        Borrowing blocked due to a previous overdue book. Unblock this student from Students &amp; teachers before checkout.
+                      </p>
+                    ) : <p className="mt-1 text-[10px] text-[#748078]">
                       {selectedLoanMember.memberType === 'Teacher' ? `Teacher limit: ${selectedLoanMember.activeLoans || 0} of 300 active copies; ${selectedMemberRemaining} more may be checked out across different titles.` : 'Students may have only one active book checked out.'}
-                    </p>
+                    </p>}
                   </div>
                 </div>
               )}
