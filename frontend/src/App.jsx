@@ -95,7 +95,217 @@ const defaultRoles = [
   { name: 'Student', permissions: ['Catalog', 'Reading', 'Attendance'] },
 ]
 
+const formatDate = (date) => date.toLocaleDateString('en-GB', {
+  day: '2-digit',
+  month: 'long',
+  year: 'numeric',
+})
+
+const getDateInputValue = (date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const shiftDateByMonths = (date, months) => {
+  const shiftedDate = new Date(date)
+  const dayOfMonth = shiftedDate.getDate()
+  shiftedDate.setDate(1)
+  shiftedDate.setMonth(shiftedDate.getMonth() - months)
+  const lastDayOfMonth = new Date(
+    shiftedDate.getFullYear(),
+    shiftedDate.getMonth() + 1,
+    0,
+  ).getDate()
+  shiftedDate.setDate(Math.min(dayOfMonth, lastDayOfMonth))
+  return shiftedDate
+}
+
+function ReportLetter({ books, auditLogs, attendance, reportDate, setReportDate }) {
+  const [period, setPeriod] = useState('week')
+  const [attachments, setAttachments] = useState([])
+
+  if (!reportDate) return null
+
+  const reportEndDate = new Date(`${reportDate}T00:00:00`)
+  const periodStartDate = period === 'week'
+    ? new Date(reportEndDate.getFullYear(), reportEndDate.getMonth(), reportEndDate.getDate() - 6)
+    : shiftDateByMonths(reportEndDate, period === 'month' ? 1 : period === 'threeMonths' ? 3 : 12)
+
+  const periodStart = getDateInputValue(periodStartDate)
+  const periodEnd = getDateInputValue(reportEndDate)
+  const periodLogs = auditLogs.filter((entry) => {
+    const activityDate = String(entry.time || '').slice(0, 10)
+    return activityDate >= periodStart && activityDate <= periodEnd
+  })
+  const periodAttendance = attendance.filter((entry) => (
+    entry.date >= periodStart && entry.date <= periodEnd
+  ))
+  const issuedBooks = periodLogs.filter((entry) => /issued/i.test(entry.action)).length
+  const returnedBooks = periodLogs.filter((entry) => /returned/i.test(entry.action)).length
+  const activities = [
+    ...periodLogs.map((entry) => ({
+      date: String(entry.time || '').slice(0, 10),
+      description: `${entry.action}: ${entry.details}`,
+    })),
+    ...periodAttendance.map((entry) => ({
+      date: entry.date,
+      description: `Reading session: ${entry.student} read ${entry.book} for ${entry.minutes} minutes.`,
+    })),
+  ].sort((left, right) => left.date.localeCompare(right.date))
+
+  const periodLabel = {
+    week: 'one week',
+    month: 'one month',
+    threeMonths: 'three months',
+    year: 'one year',
+  }[period]
+
+  const handleAttachments = (event) => {
+    const selectedFiles = Array.from(event.target.files || [], (file) => file.name)
+    setAttachments((currentFiles) => [...currentFiles, ...selectedFiles])
+    event.target.value = ''
+  }
+
+  return (
+    <section className="report-workspace">
+      <div className="panel report-controls">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Formal report</p>
+            <h2>Prepare a library report letter</h2>
+          </div>
+          <button className="primary" type="button" onClick={() => window.print()}>
+            Print / Save as PDF
+          </button>
+        </div>
+
+        <div className="report-options">
+          <label>
+            Reporting period
+            <select value={period} onChange={(event) => setPeriod(event.target.value)}>
+              <option value="week">Last week</option>
+              <option value="month">Last month</option>
+              <option value="threeMonths">Last 3 months</option>
+              <option value="year">Last year</option>
+            </select>
+          </label>
+          <label>
+            Report date
+            <input
+              type="date"
+              value={reportDate}
+              onChange={(event) => {
+                if (event.target.value) setReportDate(event.target.value)
+              }}
+            />
+          </label>
+          <label className="report-attachment-picker">
+            Attach supporting reports
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.csv,.xls,.xlsx,.doc,.docx"
+              onChange={handleAttachments}
+            />
+          </label>
+        </div>
+        <p className="form-hint">
+          Activity details are based on dated library records entered in this system.
+          Selected files are listed on the letter; print it and attach the original
+          supporting reports before submission.
+        </p>
+      </div>
+
+      <article className="report-letter" id="report-letter">
+        <div className="letter-sender">
+          <strong>NSHIMIYIMANA Yves</strong>
+          <span>Kicukiro District</span>
+          <span>Kanombe Sector</span>
+          <span>Tel: 0791756160</span>
+        </div>
+
+        <div className="letter-date">{formatDate(reportEndDate)}</div>
+
+        <div className="letter-recipient">
+          <strong>To: The Headteacher</strong>
+          <span>GS Busanza</span>
+        </div>
+
+        <p className="letter-subject"><strong>RE: SUBMISSION OF LIBRARY REPORT</strong></p>
+        <p>Dear Headteacher,</p>
+        <p>
+          I respectfully submit the library report covering {periodLabel}, from{' '}
+          <strong>{formatDate(periodStartDate)}</strong> to{' '}
+          <strong>{formatDate(reportEndDate)}</strong>. The following summary is
+          generated from the dated records available in the library management system.
+        </p>
+
+        <h3>Summary of recorded work</h3>
+        <ul className="report-summary">
+          <li>{periodLogs.length} dated system activity record(s) were logged during this period.</li>
+          <li>{issuedBooks} book issue(s) and {returnedBooks} book return(s) were recorded in the activity log.</li>
+          <li>{periodAttendance.length} in-library reading session(s) were recorded, totalling {periodAttendance.reduce((minutes, entry) => minutes + Number(entry.minutes || 0), 0)} minutes.</li>
+          <li>The current catalog contains {books.length} book record(s) as at the report date. This is a current inventory snapshot, not a count of new books added during this period.</li>
+        </ul>
+
+        <h3>Activities recorded during the period</h3>
+        {activities.length > 0 ? (
+          <ul className="report-activity-list">
+            {activities.map((activity, index) => (
+              <li key={`${activity.date}-${index}`}>
+                <strong>{formatDate(new Date(`${activity.date}T00:00:00`))}:</strong>{' '}
+                {activity.description}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>No dated activity records were available in the system for this reporting period.</p>
+        )}
+
+        <p>
+          The supporting library reports are attached for your review. I remain
+          available to provide any additional information that may be required.
+        </p>
+        <p>Yours faithfully,</p>
+
+        <div className="letter-signature">
+          <span className="signature-line" />
+          <strong>NSHIMIYIMANA Yves</strong>
+          <span>Library report submitted on {formatDate(reportEndDate)}</span>
+        </div>
+
+        <div className="letter-attachments">
+          <strong>Attachments</strong>
+          {attachments.length > 0 ? (
+            <ul>
+              {attachments.map((name, index) => (
+                <li key={`${name}-${index}`}>
+                  {name}
+                  <button
+                    className="remove-attachment"
+                    type="button"
+                    aria-label={`Remove ${name}`}
+                    onClick={() => setAttachments((currentFiles) => currentFiles.filter((_, fileIndex) => fileIndex !== index))}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>Supporting reports to be attached.</p>
+          )}
+        </div>
+      </article>
+    </section>
+  )
+}
+
 function App() {
+  const [activeView, setActiveView] = useState('dashboard')
+  const [reportDate, setReportDate] = useState('')
   const [selectedRole, setSelectedRole] = useState('Administrator')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
@@ -185,6 +395,15 @@ function App() {
       const result = await response.json()
       if (!response.ok) throw new Error(result.detail || 'Unable to add this book.')
       setBooks((currentBooks) => [...currentBooks, result])
+      setAuditLogs((currentLogs) => [
+        {
+          time: new Date().toLocaleString('sv-SE', { hour12: false }),
+          user: currentUser?.name || 'System',
+          action: 'Book added',
+          details: `Added ${result.title} (${result.code}) to the catalog`,
+        },
+        ...currentLogs,
+      ])
       setBookForm(emptyBookForm)
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to add this book. Please check the backend connection.')
@@ -257,6 +476,17 @@ function App() {
           : loan,
       ),
     )
+
+    const returnedBook = books.find((book) => book.id === bookId)
+    setAuditLogs((currentLogs) => [
+      {
+        time: new Date().toLocaleString('sv-SE', { hour12: false }),
+        user: currentUser?.name || 'System',
+        action: 'Book returned',
+        details: `${returnedBook?.title || bookId} returned to the library`,
+      },
+      ...currentLogs,
+    ])
   }
 
   const handleReadingLog = (event) => {
@@ -319,6 +549,17 @@ function App() {
           }
         }
         setBooks((currentBooks) => [...currentBooks, ...acceptedBooks])
+        if (acceptedBooks.length > 0) {
+          setAuditLogs((currentLogs) => [
+            {
+              time: new Date().toLocaleString('sv-SE', { hour12: false }),
+              user: currentUser?.name || 'System',
+              action: 'Books imported',
+              details: `Added ${acceptedBooks.length} book record(s) from ${file.name}`,
+            },
+            ...currentLogs,
+          ])
+        }
         if (duplicatesSkipped > 0) {
           alert(`${duplicatesSkipped} imported book${duplicatesSkipped === 1 ? '' : 's'} skipped because the physical code, title, grade, and type already exist.`)
         }
@@ -418,11 +659,24 @@ function App() {
         </div>
 
         <nav className="nav-menu">
-          <button className="nav-item active">Dashboard</button>
+          <button
+            className={`nav-item${activeView === 'dashboard' ? ' active' : ''}`}
+            onClick={() => setActiveView('dashboard')}
+          >
+            Dashboard
+          </button>
           <button className="nav-item">Catalog</button>
           <button className="nav-item">Circulation</button>
           <button className="nav-item">Attendance</button>
-          <button className="nav-item">Reports</button>
+          <button
+            className={`nav-item${activeView === 'reports' ? ' active' : ''}`}
+            onClick={() => {
+              setReportDate(getDateInputValue(new Date()))
+              setActiveView('reports')
+            }}
+          >
+            Reports
+          </button>
           <button className="nav-item" onClick={handleLogout}>Logout</button>
         </nav>
 
@@ -436,8 +690,8 @@ function App() {
       <main className="main-area">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Overview</p>
-            <h1>Library Management System</h1>
+            <p className="eyebrow">{activeView === 'reports' ? 'Reports' : 'Overview'}</p>
+            <h1>{activeView === 'reports' ? 'Library report letter' : 'Library Management System'}</h1>
           </div>
 
           <div className="topbar-actions">
@@ -455,6 +709,16 @@ function App() {
           </div>
         </header>
 
+        {activeView === 'reports' ? (
+          <ReportLetter
+            books={books}
+            auditLogs={auditLogs}
+            attendance={attendance}
+            reportDate={reportDate}
+            setReportDate={setReportDate}
+          />
+        ) : (
+          <>
         <section className="stats-grid">
           {dashboard.stats.map((item) => (
             <article key={item.label} className="stat-card">
@@ -858,6 +1122,8 @@ function App() {
             ))}
           </div>
         </section>
+          </>
+        )}
       </main>
     </div>
   )

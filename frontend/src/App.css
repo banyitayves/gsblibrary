@@ -802,6 +802,187 @@ td small {
   color: #64748b;
 }
 
+.report-workspace {
+  display: grid;
+  gap: 20px;
+}
+
+.report-controls .panel-header {
+  align-items: flex-start;
+}
+
+.report-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.report-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.report-options select,
+.report-options input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #dfe7f4;
+  border-radius: 10px;
+  background: white;
+  padding: 9px 11px;
+  color: #10213a;
+  font: inherit;
+}
+
+.report-attachment-picker input {
+  padding: 7px;
+}
+
+.report-letter {
+  width: min(900px, 100%);
+  margin: 0 auto;
+  padding: 56px 64px;
+  background: white;
+  border: 1px solid #e5edf7;
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+  color: #1e293b;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.letter-sender,
+.letter-recipient,
+.letter-signature {
+  display: flex;
+  flex-direction: column;
+}
+
+.letter-sender {
+  margin-bottom: 22px;
+}
+
+.letter-date {
+  margin-bottom: 24px;
+  text-align: right;
+}
+
+.letter-recipient {
+  margin-bottom: 22px;
+}
+
+.letter-subject {
+  margin: 0 0 18px;
+  text-decoration: underline;
+}
+
+.report-letter h3 {
+  margin: 24px 0 8px;
+  font-family: Inter, 'Segoe UI', sans-serif;
+  font-size: 15px;
+}
+
+.report-summary,
+.report-activity-list {
+  padding-left: 22px;
+}
+
+.report-summary li,
+.report-activity-list li {
+  margin-bottom: 6px;
+}
+
+.letter-signature {
+  gap: 3px;
+  margin-top: 32px;
+}
+
+.signature-line {
+  width: 220px;
+  height: 1px;
+  margin: 18px 0 8px;
+  background: #334155;
+}
+
+.letter-attachments {
+  margin-top: 26px;
+  padding-top: 12px;
+  border-top: 1px solid #cbd5e1;
+}
+
+.letter-attachments ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
+.letter-attachments p {
+  margin: 5px 0 0;
+}
+
+.remove-attachment {
+  margin-left: 10px;
+  border: 0;
+  background: none;
+  color: #1d4ed8;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 18mm;
+  }
+
+  body,
+  html {
+    background: white;
+  }
+
+  .sidebar,
+  .topbar,
+  .report-controls,
+  .remove-attachment {
+    display: none !important;
+  }
+
+  .app-shell,
+  .main-area,
+  .report-workspace {
+    display: block;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    background: white;
+  }
+
+  .report-letter {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    font-size: 11pt;
+  }
+
+  .report-letter h3,
+  .report-summary,
+  .report-activity-list,
+  .letter-signature,
+  .letter-attachments {
+    break-inside: avoid;
+  }
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     flex-direction: column;
@@ -847,5 +1028,17 @@ td small {
 
   .catalog-fields {
     grid-template-columns: 1fr;
+  }
+
+  .report-options {
+    grid-template-columns: 1fr;
+  }
+
+  .report-letter {
+    padding: 28px 22px;
+  }
+
+  .report-controls .panel-header {
+    flex-direction: column;
   }
 }

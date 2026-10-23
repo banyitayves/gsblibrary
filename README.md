@@ -18,6 +18,7 @@ A full-stack library operations dashboard using React + Vite on the frontend and
 - Shared physical book codes across different titles, grades, or book types while blocking exact catalog duplicates
 - Import from CSV/XLSX files
 - Export reports as CSV, Excel, and PDF
+- Prepare and print a formal library report letter for weekly, monthly, quarterly, or yearly periods, with activity summaries, listed attachments, and a signature area
 - Task tracking with a Kanban-style board
 - Document and file management overview
 
