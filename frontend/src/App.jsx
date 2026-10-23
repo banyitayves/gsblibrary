@@ -69,6 +69,19 @@ const today = () => {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
+const shiftIsoDate = (value, days) => {
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day + days))
+  return date.toISOString().slice(0, 10)
+}
+const formatReportDate = (value) => {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, month - 1, day).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  })
+}
 const dateInDays = (days) => {
   const date = new Date()
   date.setDate(date.getDate() + days)
@@ -1119,6 +1132,8 @@ function App() {
               busy={busy}
               onRun={() => runReports(reportFilters, reportKind)}
               onExport={exportReport}
+              books={books}
+              notify={notify}
             />
           )}
         </main>
@@ -2047,9 +2062,13 @@ function downloadBookTemplate() {
   URL.revokeObjectURL(url)
 }
 
-function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onExport }) {
+function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onExport, books, notify }) {
+  const [reportView, setReportView] = useState('reports')
   const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }))
   const readyReport = report?.kind === kind && JSON.stringify(report.filters) === JSON.stringify(filters) ? report.data : null
+  if (reportView === 'letter') {
+    return <LibraryReportLetter books={books} notify={notify} onBack={() => setReportView('reports')} />
+  }
   const reportOptions = [
     ['loans', 'Loan activity'],
     ['overdue', 'Overdue loans'],
@@ -2066,6 +2085,7 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
     <>
       <PageHeading eyebrow="Choose exactly what to generate" title="Reports" description="Generate filtered borrowing, member, class, and book reports.">
         <div className="flex flex-wrap gap-2">
+          <ActionButton secondary onClick={() => setReportView('letter')}>Prepare submission letter</ActionButton>
           <ActionButton secondary icon={Download} onClick={() => onExport('csv')} disabled={!readyReport}>CSV</ActionButton>
           <ActionButton secondary icon={Download} onClick={() => onExport('pdf')} disabled={!readyReport}>PDF</ActionButton>
           <ActionButton secondary icon={Download} onClick={() => onExport('excel')} disabled={!readyReport}>Excel</ActionButton>
@@ -2109,6 +2129,165 @@ function Reports({ filters, setFilters, kind, setKind, report, busy, onRun, onEx
         {kind === 'availability' && <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white"><div className="border-b border-[#edf0eb] px-5 py-4"><h2 className="text-sm font-bold">Books available in the library</h2><p className="mt-1 text-[10px] text-[#929d94]">{readyReport.length.toLocaleString()} books{filters.availability !== 'All' ? ` · ${filters.availability}` : ''}</p></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-[10px]"><thead className="bg-[#fbfcfa] text-[9px] uppercase text-[#929d94]"><tr><th className="px-5 py-3">Title</th><th className="px-4 py-3">ISBN</th><th className="px-4 py-3">Category / shelf</th><th className="px-4 py-3">Available / total</th><th className="px-5 py-3">Availability</th></tr></thead><tbody className="divide-y divide-[#f0f2ee]">{readyReport.map((book) => <tr key={book.id}><td className="px-5 py-3 font-bold">{book.title}<p className="mt-1 font-normal text-[#929d94]">{book.author}</p></td><td className="px-4 py-3">{book.isbn}</td><td className="px-4 py-3">{book.category} · {book.shelf}</td><td className="px-4 py-3">{book.availableCopies} / {book.totalCopies}</td><td className="px-5 py-3">{book.availability}</td></tr>)}{readyReport.length === 0 && <EmptyRow colSpan={5} message="No books match this availability filter." />}</tbody></table></div></section>}
       </>}
     </>
+  )
+}
+
+function LibraryReportLetter({ books, notify, onBack }) {
+  const [period, setPeriod] = useState('7')
+  const [reportDate, setReportDate] = useState(today())
+  const [attachments, setAttachments] = useState([])
+  const [report, setReport] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const periodDays = Number(period)
+  const periodStart = shiftIsoDate(reportDate, -(periodDays - 1))
+  const periodLabels = {
+    7: 'one week',
+    30: 'one month (30 days)',
+    90: 'three months (90 days)',
+    365: 'one year (365 days)',
+  }
+
+  async function generateLetterData(event) {
+    event.preventDefault()
+    setLoading(true)
+    setReport(null)
+    const range = new URLSearchParams({ from: periodStart, to: reportDate })
+    try {
+      const [loans, returns, missed, attendance] = await Promise.all([
+        api(`/reports?${range}`),
+        api(`/reports?${new URLSearchParams({ from: periodStart, to: reportDate, status: 'Returned' })}`),
+        api(`/reports?${new URLSearchParams({ from: periodStart, to: reportDate, status: 'Missed' })}`),
+        api(`/library-visits/summary?days=${periodDays}&date=${encodeURIComponent(reportDate)}`),
+      ])
+      setReport({ loans, returns, missed, attendance, periodStart, reportDate })
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const activities = report ? [
+    ...report.loans.rows.map((loan) => ({
+      date: loan.issuedAt,
+      text: `${loan.quantity} ${Number(loan.quantity) === 1 ? 'copy' : 'copies'} of ${loan.bookTitle} issued to ${loan.memberName}.`,
+    })),
+    ...report.returns.rows.filter((loan) => Number(loan.returnedQuantity) > 0).map((loan) => ({
+      date: loan.returnedAt,
+      text: `${loan.returnedQuantity} ${Number(loan.returnedQuantity) === 1 ? 'copy' : 'copies'} of ${loan.bookTitle} returned by ${loan.memberName}.`,
+    })),
+    ...report.missed.rows.filter((loan) => Number(loan.missedQuantity) > 0).map((loan) => ({
+      date: loan.missedAt,
+      text: `${loan.missedQuantity} ${Number(loan.missedQuantity) === 1 ? 'copy' : 'copies'} of ${loan.bookTitle} recorded as missing for ${loan.memberName}.`,
+    })),
+  ].filter((activity) => activity.date).sort((left, right) => left.date.localeCompare(right.date)) : []
+
+  function addAttachments(event) {
+    const selectedFiles = Array.from(event.target.files || [], (file) => file.name)
+    setAttachments((current) => [...current, ...selectedFiles])
+    event.target.value = ''
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="report-letter-controls flex flex-wrap items-center justify-between gap-3">
+        <PageHeading eyebrow="Formal library report" title="Submission letter" description="Generate a period summary from recorded library activity.">
+          <ActionButton secondary onClick={onBack}>Back to reports</ActionButton>
+        </PageHeading>
+      </div>
+
+      <form onSubmit={generateLetterData} className="report-letter-controls grid gap-3 rounded-2xl border border-[#e9ede7] bg-white p-5 sm:grid-cols-2 xl:grid-cols-4">
+        <Field label="Reporting period">
+          <select value={period} onChange={(event) => setPeriod(event.target.value)}>
+            <option value="7">Last week (7 days)</option>
+            <option value="30">Last month (30 days)</option>
+            <option value="90">Last 3 months (90 days)</option>
+            <option value="365">Last year (365 days)</option>
+          </select>
+        </Field>
+        <Field label="Report date">
+          <input type="date" max={today()} required value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
+        </Field>
+        <Field label="Supporting report files">
+          <input type="file" multiple accept=".pdf,.csv,.xls,.xlsx,.doc,.docx" onChange={addAttachments} />
+        </Field>
+        <div className="flex items-end">
+          <ActionButton type="submit" disabled={loading}>{loading ? 'Generating…' : 'Generate letter summary'}</ActionButton>
+        </div>
+        <p className="sm:col-span-2 xl:col-span-4 text-[10px] text-[#78847c]">
+          Selected files will be listed as attachments. Print the letter and attach the original report files separately.
+        </p>
+      </form>
+
+      {!report ? (
+        <section className="rounded-2xl border border-dashed border-[#dfe6dd] bg-white p-10 text-center text-sm text-[#829087]">
+          Select the period and report date, then generate the letter summary from library records.
+        </section>
+      ) : (
+        <article className="library-report-print mx-auto max-w-4xl rounded-2xl border border-[#e9ede7] bg-white p-6 text-[13px] leading-7 text-[#253a2e] shadow-sm sm:p-10">
+          <div className="report-letter-controls mb-4 flex justify-end">
+            <ActionButton onClick={() => window.print()}>Print / Save as PDF</ActionButton>
+          </div>
+          <header className="mb-7">
+            <p className="font-bold">NSHIMIYIMANA Yves</p>
+            <p>Kicukiro District</p>
+            <p>Kanombe Sector</p>
+            <p>Tel: 0791756160</p>
+          </header>
+
+          <p className="mb-6 text-right">{formatReportDate(report.reportDate)}</p>
+          <p className="font-bold">To: The Headteacher</p>
+          <p className="mb-6">GS Busanza</p>
+          <p className="mb-5 font-bold underline">RE: SUBMISSION OF LIBRARY REPORT</p>
+          <p className="mb-4">Dear Headteacher,</p>
+          <p className="mb-4">
+            I respectfully submit the library report covering {periodLabels[period]}, from{' '}
+            <strong>{formatReportDate(report.periodStart)}</strong> to{' '}
+            <strong>{formatReportDate(report.reportDate)}</strong>. This summary is based on the library records available in the system for that period.
+          </p>
+
+          <h2 className="mb-2 mt-6 font-bold">Summary of library work</h2>
+          <ul className="mb-4 list-disc space-y-1 pl-6">
+            <li>{Number(report.loans.summary.totalLoans).toLocaleString()} book copies were issued.</li>
+            <li>{Number(report.returns.summary.returnedLoans).toLocaleString()} book copies were recorded as returned during the period.</li>
+            <li>{Number(report.missed.summary.missedLoans).toLocaleString()} book copies were recorded as missing during the period.</li>
+            <li>{Number(report.attendance.periodVisits).toLocaleString()} library visit(s) were recorded, by {Number(report.attendance.periodUniqueVisitors).toLocaleString()} unique visitor(s).</li>
+            <li>The current catalog contains {books.length.toLocaleString()} book title(s) and {books.reduce((total, book) => total + Number(book.totalCopies || 0), 0).toLocaleString()} total copies. This is a current inventory snapshot, not a historical count for the selected period.</li>
+          </ul>
+
+          <h2 className="mb-2 mt-6 font-bold">Recorded circulation activities</h2>
+          {activities.length > 0 ? (
+            <ul className="mb-4 list-disc space-y-1 pl-6">
+              {activities.slice(0, 25).map((activity, index) => (
+                <li key={`${activity.date}-${index}`}><strong>{activity.date}:</strong> {activity.text}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mb-4">No book issue, return, or missing-book records were found for this period.</p>
+          )}
+          {(report.loans.truncated || report.returns.truncated || report.missed.truncated) && (
+            <p className="mb-4 text-[10px]">The activity list is limited to the first 25 displayed records. Summary totals above include all records returned by the report service.</p>
+          )}
+          <p className="mb-5">
+            Supporting library reports are attached for your review. I remain available to provide any further information required.
+          </p>
+          <p>Yours faithfully,</p>
+          <div className="mb-8 mt-8 flex flex-col">
+            <span className="mb-2 h-8 w-56 border-b border-[#253a2e]" />
+            <strong>NSHIMIYIMANA Yves</strong>
+            <span>Library report submitted on {formatReportDate(report.reportDate)}</span>
+          </div>
+          <div className="border-t border-[#d8dfd7] pt-3">
+            <strong>Attachments</strong>
+            {attachments.length > 0 ? (
+              <ul className="list-disc pl-6">
+                {attachments.map((name, index) => <li key={`${name}-${index}`}>{name}</li>)}
+              </ul>
+            ) : <p>Supporting library reports to be attached.</p>}
+          </div>
+        </article>
+      )}
+    </div>
   )
 }
 

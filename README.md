@@ -112,6 +112,7 @@ This changes the single librarian account's username and bcrypt password without
 - Prepared, manual SMS reminders for borrowers with books due tomorrow
 - Daily library attendance for students and teachers, optional reading-book records, frequent-visitor rankings, and date-based CSV export
 - Borrower counts and filtered circulation/class reports
+- Printable library report letter with weekly, monthly, quarterly, and yearly summaries, report attachments, and a signature area
 - Audit history for library actions
 - JWT sign-in, hashed staff passwords, email-based librarian password recovery, and Administrator/Librarian permissions
 
@@ -138,6 +139,8 @@ To message several borrowers who currently have books outstanding, choose **Mess
 ### Separate reports
 
 In **Reports**, choose and generate loan activity, overdue loans, returned-loan history, student/teacher borrowing totals, members who have never borrowed, borrowing by class, most-borrowed books, book inventory, or book availability (including out-of-stock books). Reports support the relevant member, class, date, and search filters. Export the generated result as CSV, PDF, or an Excel workbook.
+
+Choose **Prepare submission letter** on the Reports page to create a formal letter to the GS Busanza Headteacher. Select a period (7, 30, 90, or 365 days) and report date; the letter uses recorded circulation and attendance data for that date range and includes current inventory totals. Select supporting files to list them on the letter, print or save the letter as PDF, then attach the original report files separately before submission.
 
 ### Library attendance
 
