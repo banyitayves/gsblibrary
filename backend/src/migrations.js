@@ -29,6 +29,26 @@ export async function ensureOverdueUnblockColumn(connection) {
   }
 }
 
+export async function ensurePastPapersTable(connection) {
+  await connection.query(
+    `CREATE TABLE IF NOT EXISTS past_papers (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      title VARCHAR(200) NOT NULL,
+      subject VARCHAR(100) NOT NULL,
+      academic_year SMALLINT UNSIGNED NOT NULL,
+      class_section VARCHAR(40) NULL,
+      file_name VARCHAR(255) NOT NULL,
+      file_size INT UNSIGNED NOT NULL,
+      file_data MEDIUMBLOB NOT NULL,
+      uploaded_by VARCHAR(120) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_past_papers_subject_year (subject, academic_year),
+      INDEX idx_past_papers_class (class_section),
+      INDEX idx_past_papers_title (title)
+    ) ENGINE=InnoDB`,
+  )
+}
+
 export async function migrateSchoolDirectory(connection) {
   await connection.query(
     `CREATE TABLE IF NOT EXISTS library_visits (

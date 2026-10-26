@@ -8,7 +8,7 @@ import { config, isSmtpConfigured, requireJwtSecret } from './config.js'
 import { authenticate, allowRoles } from './auth.js'
 import { pool } from './db.js'
 import { csvDocument, parseCsv } from './csv.js'
-import { ensureOverdueUnblockColumn, migratePasswordResetTokens, migrateSchoolDirectory } from './migrations.js'
+import { ensureOverdueUnblockColumn, ensurePastPapersTable, migratePasswordResetTokens, migrateSchoolDirectory } from './migrations.js'
 import { sendEmail } from './email.js'
 
 const app = express()
@@ -92,6 +92,7 @@ async function ensureOverdueUnblockSchema() {
       const connection = await pool.getConnection()
       try {
         await ensureOverdueUnblockColumn(connection)
+        await ensurePastPapersTable(connection)
       } finally {
         connection.release()
       }
@@ -552,6 +553,112 @@ app.get('/api/books', ...staff, asyncRoute(async (req, res) => {
     [search, search, search, search, search, search, search, search],
   )
   res.json(books.map((book) => ({ ...book, id: Number(book.id) })))
+}))
+
+app.get('/api/past-papers', ...staff, asyncRoute(async (req, res) => {
+  const search = `%${String(req.query.search || '').trim()}%`
+  const [papers] = await pool.execute(
+    `SELECT id, title, subject, academic_year AS academicYear, class_section AS classSection,
+       file_name AS fileName, file_size AS fileSize, uploaded_by AS uploadedBy,
+       DATE_FORMAT(created_at, '%Y-%m-%d') AS uploadedAt
+     FROM past_papers
+     WHERE title LIKE ? OR subject LIKE ? OR class_section LIKE ? OR CAST(academic_year AS CHAR) LIKE ?
+     ORDER BY academic_year DESC, subject, title`,
+    [search, search, search, search],
+  )
+  res.json(papers.map((paper) => ({
+    ...paper,
+    id: Number(paper.id),
+    academicYear: Number(paper.academicYear),
+    fileSize: Number(paper.fileSize),
+  })))
+}))
+
+app.post('/api/past-papers', ...canManage, express.raw({ type: 'application/pdf', limit: '15mb' }), asyncRoute(async (req, res) => {
+  const title = String(req.query.title || '').trim()
+  const subject = String(req.query.subject || '').trim()
+  const academicYear = Number(req.query.year)
+  const classSectionValue = String(req.query.classSection || '').trim().toUpperCase()
+  const classSection = classSectionValue || null
+  if (!title || title.length > 200 || !subject || subject.length > 100
+    || !Number.isInteger(academicYear) || academicYear < 1900 || academicYear > 2100
+    || (classSection && classSection.length > 40)) {
+    return res.status(400).json({ error: 'Enter a title, subject, valid year, and optional class of at most 40 characters.' })
+  }
+  if (!Buffer.isBuffer(req.body) || req.body.length < 8 || !req.body.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
+    return res.status(400).json({ error: 'Upload a valid PDF past paper no larger than 15 MB.' })
+  }
+  let fileName
+  try {
+    fileName = decodeURIComponent(String(req.get('X-File-Name') || 'past-paper.pdf'))
+  } catch {
+    return res.status(400).json({ error: 'The uploaded file name is invalid.' })
+  }
+  fileName = fileName.split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f]/g, '').trim()
+  if (!fileName || fileName.length > 255 || !fileName.toLowerCase().endsWith('.pdf')) {
+    return res.status(400).json({ error: 'Choose a PDF file with a valid file name.' })
+  }
+
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [result] = await connection.execute(
+      `INSERT INTO past_papers
+        (title, subject, academic_year, class_section, file_name, file_size, file_data, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [title, subject, academicYear, classSection, fileName, req.body.length, req.body, req.user.name],
+    )
+    await audit(connection, req.user.name, 'Past paper uploaded', `Uploaded "${title}" for ${subject} (${academicYear})`)
+    await connection.commit()
+    res.status(201).json({
+      id: Number(result.insertId),
+      title,
+      subject,
+      academicYear,
+      classSection,
+      fileName,
+      fileSize: req.body.length,
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}))
+
+app.get('/api/past-papers/:id/download', ...staff, asyncRoute(async (req, res) => {
+  const paperId = Number(req.params.id)
+  if (!Number.isSafeInteger(paperId) || paperId < 1) return res.status(400).json({ error: 'Past paper ID must be a positive integer.' })
+  const [[paper]] = await pool.execute(
+    'SELECT file_name AS fileName, file_data AS fileData FROM past_papers WHERE id = ?',
+    [paperId],
+  )
+  if (!paper) return res.status(404).json({ error: 'Past paper not found.' })
+  res.type('application/pdf').attachment(paper.fileName).send(paper.fileData)
+}))
+
+app.delete('/api/past-papers/:id', ...canManage, asyncRoute(async (req, res) => {
+  const paperId = Number(req.params.id)
+  if (!Number.isSafeInteger(paperId) || paperId < 1) return res.status(400).json({ error: 'Past paper ID must be a positive integer.' })
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[paper]] = await connection.execute('SELECT title FROM past_papers WHERE id = ? FOR UPDATE', [paperId])
+    if (!paper) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Past paper not found.' })
+    }
+    await connection.execute('DELETE FROM past_papers WHERE id = ?', [paperId])
+    await audit(connection, req.user.name, 'Past paper deleted', `Deleted "${paper.title}"`)
+    await connection.commit()
+    res.status(204).end()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
 }))
 
 app.post('/api/books/import', ...canManage, asyncRoute(async (req, res) => {
@@ -1335,9 +1442,9 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
     }
     if (member.memberType === 'Student' && quantity !== 1) {
       await connection.rollback()
-      return res.status(400).json({ error: 'Students may check out only one book at a time.' })
+      return res.status(400).json({ error: 'Students may check out only one copy of each book at a time.' })
     }
-    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 1
+    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 2
     const activeLoans = await checkoutLoanCount(connection, member)
     if (activeLoans + quantity > maximumActiveLoans) {
       await connection.rollback()
@@ -1438,13 +1545,14 @@ app.post('/api/loans/batch', ...canManage, asyncRoute(async (req, res) => {
       await connection.rollback()
       return res.status(409).json({ error: 'This student is blocked from borrowing because they have an overdue book. Return the overdue book or unblock the student first.' })
     }
-    if (member.memberType === 'Student' && (normalizedItems.length !== 1 || totalQuantity !== 1)) {
+    if (member.memberType === 'Student'
+      && (normalizedItems.length > 2 || totalQuantity > 2 || normalizedItems.some((item) => item.quantity !== 1))) {
       await connection.rollback()
-      return res.status(400).json({ error: 'Students may check out only one book at a time.' })
+      return res.status(400).json({ error: 'Students may check out up to two different books at a time, one copy of each.' })
     }
 
     const activeLoans = await checkoutLoanCount(connection, member)
-    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 1
+    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 2
     if (activeLoans + totalQuantity > maximumActiveLoans) {
       await connection.rollback()
       return res.status(409).json({
@@ -1999,6 +2107,9 @@ app.get('/api/export/reports.csv', ...staff, asyncRoute(async (req, res) => {
 app.use((req, res) => res.status(404).json({ error: `No route for ${req.method} ${req.path}.` }))
 
 app.use((error, _req, res, _next) => {
+  if (error.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Past papers must be 15 MB or smaller.' })
+  }
   if (error.code === 'MISSING_JWT_SECRET') {
     console.error(error.message)
     return res.status(503).json({ error: 'Authentication is not configured. Set JWT_SECRET in your deployment environment.' })

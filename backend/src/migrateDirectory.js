@@ -1,10 +1,11 @@
 import { pool } from './db.js'
-import { migrateSchoolDirectory } from './migrations.js'
+import { ensurePastPapersTable, migrateSchoolDirectory } from './migrations.js'
 
 try {
   const connection = await pool.getConnection()
   try {
     await migrateSchoolDirectory(connection)
+    await ensurePastPapersTable(connection)
   } finally {
     connection.release()
   }

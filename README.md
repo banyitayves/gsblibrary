@@ -106,7 +106,8 @@ This changes the single librarian account's username and bcrypt password without
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
 - Optional single email address per member and manually prepared checkout and return summaries by email or WhatsApp
 - Name, membership-number, class, and member-type search and filters
-- Book checkout with an optional physical copy/accession code, multi-title quantity checkout for teachers (up to 300 active copies), a one-book student limit, returned/missing copy reconciliation, and overdue tracking
+- Book checkout with an optional physical copy/accession code, multi-title quantity checkout for teachers (up to 300 active copies), a two-book student limit, returned/missing copy reconciliation, and overdue tracking
+- A separate past-paper library with staff PDF upload, subject/year/class search, and authenticated downloads
 - Manual Gmail and WhatsApp return reminders for borrowers whose books are due today or overdue
 - Manually select up to 10 borrowers with outstanding books and prepare individual Gmail or WhatsApp messages listing all their active titles, grades, quantities, and due dates
 - Prepared, manual SMS reminders for borrowers with books due tomorrow
@@ -156,9 +157,13 @@ title,isbn,publisher,author,total_copies,date_delivered,publication_year,grade,s
 
 The title and total copy count are required. ISBN, publisher, author, delivery date, publication year, grade, shelf location, and category may be blank. Delivery dates use `YYYY-MM-DD`; publication year is a four-digit year. An ISBN already in the catalog or repeated in the same file is skipped and reported. Imports accept up to 5,000 rows. Individual book details can also be entered or edited with **Book collection → Add a book**.
 
+### Past papers
+
+Use **Past papers** in the navigation to keep exam papers separate from the borrowable book catalog. Administrators and Librarians can upload PDF past papers up to 15 MB each, with a title, subject, year, and optional class. Staff can search the collection and download or delete papers. Past papers are stored separately and do not affect book inventory, loans, or borrowing limits. Existing databases receive the past-paper table automatically when the API starts; `npm.cmd run db:migrate:directory` also creates it for an existing deployment.
+
 The header includes a sun/moon button to switch between light and dark themes. Your choice is saved in this browser.
 
-At checkout, each student may have at most **1 active book** at a time. A student with an overdue book is automatically blocked from borrowing again; a Librarian or Administrator can use **Students & teachers → Unblock** to allow borrowing despite the current overdue loan. A later loan becoming overdue blocks the student again. Teachers can check out multiple titles and quantities in one checkout, up to **300 active copies** across all titles (for example, 30 Kinyarwanda and 2 Biology books). When recording a return, enter how many copies are available again and how many are missing. Any copies not included in either quantity remain outstanding. Returned copies increase available inventory; missing copies reduce total inventory.
+At checkout, each student may have at most **2 active books** at a time, one copy of each title. A student with an overdue book is automatically blocked from borrowing again; a Librarian or Administrator can use **Students & teachers → Unblock** to allow borrowing despite the current overdue loan. A later loan becoming overdue blocks the student again. Teachers can check out multiple titles and quantities in one checkout, up to **300 active copies** across all titles (for example, 30 Kinyarwanda and 2 Biology books). When recording a return, enter how many copies are available again and how many are missing. Any copies not included in either quantity remain outstanding. Returned copies increase available inventory; missing copies reduce total inventory.
 
 If checked-out copies are lost, use **Loans & returns → Mark missed** and enter their quantity in the return dialog's **Copies missing** field. This reduces the book title's total inventory by that number without increasing available copies and records who had them. Missed copies appear in the **Missed books** report and can be filtered by name, class, book, and date, then downloaded as CSV, PDF, or Excel. Loan lists and reports show quantities issued, returned, missed, and still outstanding.
 
