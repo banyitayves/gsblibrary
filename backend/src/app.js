@@ -559,44 +559,53 @@ app.get('/api/past-papers', ...staff, asyncRoute(async (req, res) => {
   const search = `%${String(req.query.search || '').trim()}%`
   const [papers] = await pool.execute(
     `SELECT id, title, subject, academic_year AS academicYear, class_section AS classSection,
-       file_name AS fileName, file_size AS fileSize, uploaded_by AS uploadedBy,
-       DATE_FORMAT(created_at, '%Y-%m-%d') AS uploadedAt
+       total_copies AS totalCopies, available_copies AS availableCopies,
+       uploaded_by AS addedBy, DATE_FORMAT(created_at, '%Y-%m-%d') AS addedAt
      FROM past_papers
      WHERE title LIKE ? OR subject LIKE ? OR class_section LIKE ? OR CAST(academic_year AS CHAR) LIKE ?
      ORDER BY academic_year DESC, subject, title`,
     [search, search, search, search],
   )
-  res.json(papers.map((paper) => ({
-    ...paper,
-    id: Number(paper.id),
-    academicYear: Number(paper.academicYear),
-    fileSize: Number(paper.fileSize),
-  })))
+  res.json(papers.map((paper) => Object.fromEntries(Object.entries(paper).map(([key, value]) => [
+    key,
+    ['id', 'academicYear', 'totalCopies', 'availableCopies'].includes(key) ? Number(value) : value,
+  ]))))
 }))
 
-app.post('/api/past-papers', ...canManage, express.raw({ type: 'application/pdf', limit: '15mb' }), asyncRoute(async (req, res) => {
-  const title = String(req.query.title || '').trim()
-  const subject = String(req.query.subject || '').trim()
-  const academicYear = Number(req.query.year)
-  const classSectionValue = String(req.query.classSection || '').trim().toUpperCase()
+app.get('/api/past-paper-loans', ...staff, asyncRoute(async (_req, res) => {
+  const [loans] = await pool.execute(
+    `SELECT l.id, l.past_paper_id AS pastPaperId, l.member_id AS memberId,
+       p.title AS paperTitle, p.subject, p.academic_year AS academicYear,
+       m.name AS memberName, m.membership_number AS membershipNumber,
+       m.member_type AS memberType, m.class_section AS classSection,
+       DATE_FORMAT(l.issued_at, '%Y-%m-%d') AS issuedAt,
+       DATE_FORMAT(l.due_date, '%Y-%m-%d') AS dueDate,
+       l.quantity, l.returned_quantity AS returnedQuantity
+     FROM past_paper_loans l
+     JOIN past_papers p ON p.id = l.past_paper_id
+     JOIN members m ON m.id = l.member_id
+     WHERE l.quantity > l.returned_quantity
+     ORDER BY l.due_date, m.name, p.title`,
+  )
+  res.json(loans.map((loan) => Object.fromEntries(Object.entries(loan).map(([key, value]) => [
+    key,
+    ['id', 'pastPaperId', 'memberId', 'academicYear', 'quantity', 'returnedQuantity'].includes(key) ? Number(value) : value,
+  ]))))
+}))
+
+app.post('/api/past-papers', ...canManage, asyncRoute(async (req, res) => {
+  const body = req.body || {}
+  const title = String(body.title || '').trim()
+  const subject = String(body.subject || '').trim()
+  const academicYear = Number(body.academicYear)
+  const totalCopies = Number(body.totalCopies)
+  const classSectionValue = String(body.classSection || '').trim().toUpperCase()
   const classSection = classSectionValue || null
   if (!title || title.length > 200 || !subject || subject.length > 100
     || !Number.isInteger(academicYear) || academicYear < 1900 || academicYear > 2100
+    || !Number.isInteger(totalCopies) || totalCopies < 1 || totalCopies > 300
     || (classSection && classSection.length > 40)) {
-    return res.status(400).json({ error: 'Enter a title, subject, valid year, and optional class of at most 40 characters.' })
-  }
-  if (!Buffer.isBuffer(req.body) || req.body.length < 8 || !req.body.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
-    return res.status(400).json({ error: 'Upload a valid PDF past paper no larger than 15 MB.' })
-  }
-  let fileName
-  try {
-    fileName = decodeURIComponent(String(req.get('X-File-Name') || 'past-paper.pdf'))
-  } catch {
-    return res.status(400).json({ error: 'The uploaded file name is invalid.' })
-  }
-  fileName = fileName.split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f]/g, '').trim()
-  if (!fileName || fileName.length > 255 || !fileName.toLowerCase().endsWith('.pdf')) {
-    return res.status(400).json({ error: 'Choose a PDF file with a valid file name.' })
+    return res.status(400).json({ error: 'Enter a title, subject, valid year, at least one copy (up to 300), and optional class of at most 40 characters.' })
   }
 
   const connection = await pool.getConnection()
@@ -604,11 +613,11 @@ app.post('/api/past-papers', ...canManage, express.raw({ type: 'application/pdf'
     await connection.beginTransaction()
     const [result] = await connection.execute(
       `INSERT INTO past_papers
-        (title, subject, academic_year, class_section, file_name, file_size, file_data, uploaded_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [title, subject, academicYear, classSection, fileName, req.body.length, req.body, req.user.name],
+        (title, subject, academic_year, class_section, total_copies, available_copies, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [title, subject, academicYear, classSection, totalCopies, totalCopies, req.user.name],
     )
-    await audit(connection, req.user.name, 'Past paper uploaded', `Uploaded "${title}" for ${subject} (${academicYear})`)
+    await audit(connection, req.user.name, 'Past paper inventory added', `Added ${totalCopies} copies of "${title}" for ${subject} (${academicYear})`)
     await connection.commit()
     res.status(201).json({
       id: Number(result.insertId),
@@ -616,8 +625,8 @@ app.post('/api/past-papers', ...canManage, express.raw({ type: 'application/pdf'
       subject,
       academicYear,
       classSection,
-      fileName,
-      fileSize: req.body.length,
+      totalCopies,
+      availableCopies: totalCopies,
     })
   } catch (error) {
     await connection.rollback()
@@ -627,15 +636,124 @@ app.post('/api/past-papers', ...canManage, express.raw({ type: 'application/pdf'
   }
 }))
 
-app.get('/api/past-papers/:id/download', ...staff, asyncRoute(async (req, res) => {
-  const paperId = Number(req.params.id)
-  if (!Number.isSafeInteger(paperId) || paperId < 1) return res.status(400).json({ error: 'Past paper ID must be a positive integer.' })
-  const [[paper]] = await pool.execute(
-    'SELECT file_name AS fileName, file_data AS fileData FROM past_papers WHERE id = ?',
-    [paperId],
-  )
-  if (!paper) return res.status(404).json({ error: 'Past paper not found.' })
-  res.type('application/pdf').attachment(paper.fileName).send(paper.fileData)
+app.post('/api/past-paper-loans', ...canManage, asyncRoute(async (req, res) => {
+  const body = req.body || {}
+  const paperId = Number(body.pastPaperId)
+  const memberId = Number(body.memberId)
+  const quantity = Number(body.quantity)
+  const dueDate = String(body.dueDate || '')
+  if (!Number.isSafeInteger(paperId) || paperId < 1 || !Number.isSafeInteger(memberId) || memberId < 1
+    || !Number.isInteger(quantity) || quantity < 1 || quantity > 300
+    || !isValidIsoDate(dueDate) || dueDate < formatLocalDate(new Date())) {
+    return res.status(400).json({ error: 'Choose a paper, an active member, a quantity from 1 to 300, and a due date of today or later.' })
+  }
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[member]] = await connection.execute(
+      `SELECT id, name, member_type AS memberType,
+         overdue_unblocked_through_loan_id AS overdueUnblockedThroughLoanId
+       FROM members WHERE id = ? AND status = ? FOR UPDATE`,
+      [memberId, 'Active'],
+    )
+    if (!member) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Active member not found.' })
+    }
+    if (member.memberType === 'Student' && isOverdueBlocked(member, await latestOverdueLoanId(connection, memberId))) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'This student is blocked from borrowing because they have an overdue book. Return the overdue book or unblock the student first.' })
+    }
+    const [[row]] = await connection.execute(
+      `SELECT COALESCE(SUM(quantity - returned_quantity), 0) AS activeLoans
+       FROM past_paper_loans WHERE member_id = ? AND quantity > returned_quantity`,
+      [memberId],
+    )
+    const activeLoans = Number(row.activeLoans)
+    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 2
+    if (activeLoans + quantity > maximumActiveLoans) {
+      await connection.rollback()
+      return res.status(409).json({ error: `${member.memberType}s may have at most ${maximumActiveLoans} active past-paper copies at a time; this member has ${activeLoans}.` })
+    }
+    const [[paper]] = await connection.execute(
+      'SELECT id, title, available_copies AS availableCopies FROM past_papers WHERE id = ? FOR UPDATE',
+      [paperId],
+    )
+    if (!paper) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Past paper not found.' })
+    }
+    if (Number(paper.availableCopies) < quantity) {
+      await connection.rollback()
+      return res.status(409).json({ error: `Only ${paper.availableCopies} ${Number(paper.availableCopies) === 1 ? 'copy is' : 'copies are'} available.` })
+    }
+    const [result] = await connection.execute(
+      'INSERT INTO past_paper_loans (past_paper_id, member_id, due_date, quantity) VALUES (?, ?, ?, ?)',
+      [paperId, memberId, dueDate, quantity],
+    )
+    await connection.execute(
+      'UPDATE past_papers SET available_copies = available_copies - ? WHERE id = ?',
+      [quantity, paperId],
+    )
+    await audit(connection, req.user.name, 'Past paper checked out', `${quantity} ${quantity === 1 ? 'copy' : 'copies'} of "${paper.title}" checked out to ${member.name}, due ${dueDate}`)
+    await connection.commit()
+    res.status(201).json({ id: Number(result.insertId), pastPaperId: paperId, paperTitle: paper.title, memberId, memberName: member.name, dueDate, quantity, returnedQuantity: 0 })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}))
+
+app.post('/api/past-paper-loans/:id/return', ...canManage, asyncRoute(async (req, res) => {
+  const loanId = Number(req.params.id)
+  const returnQuantity = Number((req.body || {}).quantity)
+  if (!Number.isSafeInteger(loanId) || loanId < 1 || !Number.isInteger(returnQuantity) || returnQuantity < 1 || returnQuantity > 300) {
+    return res.status(400).json({ error: 'Choose a valid past-paper loan and return quantity.' })
+  }
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[loan]] = await connection.execute(
+      `SELECT l.past_paper_id AS pastPaperId, l.member_id AS memberId,
+         l.quantity, l.returned_quantity AS returnedQuantity,
+         p.title AS paperTitle, m.name AS memberName
+       FROM past_paper_loans l
+       JOIN past_papers p ON p.id = l.past_paper_id
+       JOIN members m ON m.id = l.member_id
+       WHERE l.id = ? FOR UPDATE`,
+      [loanId],
+    )
+    if (!loan) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Past-paper loan not found.' })
+    }
+    const outstanding = Number(loan.quantity) - Number(loan.returnedQuantity)
+    if (returnQuantity > outstanding) {
+      await connection.rollback()
+      return res.status(409).json({ error: `Only ${outstanding} outstanding ${outstanding === 1 ? 'copy can' : 'copies can'} be returned.` })
+    }
+    const returnedQuantity = Number(loan.returnedQuantity) + returnQuantity
+    await connection.execute(
+      `UPDATE past_paper_loans SET returned_quantity = ?,
+         returned_at = IF(? = quantity, CURRENT_TIMESTAMP, returned_at)
+       WHERE id = ?`,
+      [returnedQuantity, returnedQuantity, loanId],
+    )
+    await connection.execute(
+      'UPDATE past_papers SET available_copies = available_copies + ? WHERE id = ?',
+      [returnQuantity, loan.pastPaperId],
+    )
+    await audit(connection, req.user.name, 'Past paper returned', `${returnQuantity} ${returnQuantity === 1 ? 'copy' : 'copies'} of "${loan.paperTitle}" returned by ${loan.memberName}`)
+    await connection.commit()
+    res.json({ id: loanId, returnedQuantity, outstandingQuantity: outstanding - returnQuantity })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
 }))
 
 app.delete('/api/past-papers/:id', ...canManage, asyncRoute(async (req, res) => {
@@ -644,13 +762,18 @@ app.delete('/api/past-papers/:id', ...canManage, asyncRoute(async (req, res) => 
   const connection = await pool.getConnection()
   try {
     await connection.beginTransaction()
-    const [[paper]] = await connection.execute('SELECT title FROM past_papers WHERE id = ? FOR UPDATE', [paperId])
+    const [[paper]] = await connection.execute('SELECT id, title FROM past_papers WHERE id = ? FOR UPDATE', [paperId])
     if (!paper) {
       await connection.rollback()
       return res.status(404).json({ error: 'Past paper not found.' })
     }
+    const [[history]] = await connection.execute('SELECT COUNT(*) AS loanCount FROM past_paper_loans WHERE past_paper_id = ?', [paperId])
+    if (Number(history.loanCount) > 0) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'Past papers with checkout history cannot be deleted.' })
+    }
     await connection.execute('DELETE FROM past_papers WHERE id = ?', [paperId])
-    await audit(connection, req.user.name, 'Past paper deleted', `Deleted "${paper.title}"`)
+    await audit(connection, req.user.name, 'Past paper inventory deleted', `Deleted "${paper.title}"`)
     await connection.commit()
     res.status(204).end()
   } catch (error) {
@@ -1444,7 +1567,7 @@ app.post('/api/loans', ...canManage, asyncRoute(async (req, res) => {
       await connection.rollback()
       return res.status(400).json({ error: 'Students may check out only one copy of each book at a time.' })
     }
-    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 2
+    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 1
     const activeLoans = await checkoutLoanCount(connection, member)
     if (activeLoans + quantity > maximumActiveLoans) {
       await connection.rollback()
@@ -1546,13 +1669,13 @@ app.post('/api/loans/batch', ...canManage, asyncRoute(async (req, res) => {
       return res.status(409).json({ error: 'This student is blocked from borrowing because they have an overdue book. Return the overdue book or unblock the student first.' })
     }
     if (member.memberType === 'Student'
-      && (normalizedItems.length > 2 || totalQuantity > 2 || normalizedItems.some((item) => item.quantity !== 1))) {
+      && (normalizedItems.length > 1 || totalQuantity > 1 || normalizedItems.some((item) => item.quantity !== 1))) {
       await connection.rollback()
-      return res.status(400).json({ error: 'Students may check out up to two different books at a time, one copy of each.' })
+      return res.status(400).json({ error: 'Students may check out only one book at a time.' })
     }
 
     const activeLoans = await checkoutLoanCount(connection, member)
-    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 2
+    const maximumActiveLoans = member.memberType === 'Teacher' ? 300 : 1
     if (activeLoans + totalQuantity > maximumActiveLoans) {
       await connection.rollback()
       return res.status(409).json({

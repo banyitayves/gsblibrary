@@ -34,9 +34,8 @@ CREATE TABLE IF NOT EXISTS past_papers (
   subject VARCHAR(100) NOT NULL,
   academic_year SMALLINT UNSIGNED NOT NULL,
   class_section VARCHAR(40) NULL,
-  file_name VARCHAR(255) NOT NULL,
-  file_size INT UNSIGNED NOT NULL,
-  file_data MEDIUMBLOB NOT NULL,
+  total_copies INT UNSIGNED NOT NULL DEFAULT 1,
+  available_copies INT UNSIGNED NOT NULL DEFAULT 1,
   uploaded_by VARCHAR(120) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_past_papers_subject_year (subject, academic_year),
@@ -60,6 +59,22 @@ CREATE TABLE IF NOT EXISTS members (
   INDEX idx_members_name (name),
   INDEX idx_members_class_section (class_section),
   INDEX idx_members_type (member_type)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS past_paper_loans (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  past_paper_id BIGINT UNSIGNED NOT NULL,
+  member_id BIGINT UNSIGNED NOT NULL,
+  issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  due_date DATE NOT NULL,
+  quantity INT UNSIGNED NOT NULL DEFAULT 1,
+  returned_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+  returned_at TIMESTAMP NULL DEFAULT NULL,
+  INDEX idx_past_paper_loans_due_date (due_date),
+  INDEX idx_past_paper_loans_member (member_id),
+  INDEX idx_past_paper_loans_paper (past_paper_id),
+  CONSTRAINT fk_past_paper_loans_paper FOREIGN KEY (past_paper_id) REFERENCES past_papers(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_past_paper_loans_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS loans (

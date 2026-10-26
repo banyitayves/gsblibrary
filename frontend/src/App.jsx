@@ -199,7 +199,7 @@ function checkoutBookLabel(book) {
 }
 
 function checkoutMemberLabel(member) {
-  const limit = member.memberType === 'Teacher' ? 300 : 2
+  const limit = member.memberType === 'Teacher' ? 300 : 1
   const status = member.overdueBlocked ? ' · BLOCKED — unblock required' : ''
   return `${member.name} · ${member.memberType}${member.classSection ? ` · ${member.classSection}` : ''} · ${member.membershipNumber} · ${member.checkoutActiveLoans ?? member.activeLoans ?? 0}/${limit} copies${status}`
 }
@@ -255,6 +255,7 @@ function App() {
   const [dashboard, setDashboard] = useState(null)
   const [books, setBooks] = useState([])
   const [pastPapers, setPastPapers] = useState([])
+  const [pastPaperLoans, setPastPaperLoans] = useState([])
   const [members, setMembers] = useState([])
   const [loans, setLoans] = useState([])
   const [visits, setVisits] = useState([])
@@ -350,7 +351,12 @@ function App() {
 
   const loadPastPapers = useCallback(async () => {
     try {
-      setPastPapers(await api('/past-papers'))
+      const [papers, paperLoans] = await Promise.all([
+        api('/past-papers'),
+        api('/past-paper-loans'),
+      ])
+      setPastPapers(papers)
+      setPastPaperLoans(paperLoans)
     } catch (error) {
       notify(error.message)
     }
@@ -567,8 +573,8 @@ function App() {
       return
     }
     if (selectedLoanMember?.memberType === 'Student'
-      && (items.length > 2 || items.some((item) => item.quantity !== 1))) {
-      notify('Students may check out up to two different books at a time, one copy of each.')
+      && (items.length > 1 || items.some((item) => item.quantity !== 1))) {
+      notify('Students may check out only one book at a time.')
       return
     }
     if (selectedLoanQuantity > selectedMemberRemaining) {
@@ -793,37 +799,24 @@ function App() {
     }
   }
 
-  async function uploadPastPaper(event) {
+  async function addPastPaper(event) {
     event.preventDefault()
     const form = event.currentTarget
     const formData = new FormData(form)
-    const file = formData.get('file')
-    if (!(file instanceof File) || !file.size) {
-      notify('Choose a PDF past paper to upload.')
-      return
-    }
-    if (file.size > 15 * 1024 * 1024) {
-      notify('Past papers must be 15 MB or smaller.')
-      return
-    }
-    const params = new URLSearchParams({
-      title: String(formData.get('title') || ''),
-      subject: String(formData.get('subject') || ''),
-      year: String(formData.get('year') || ''),
-      classSection: String(formData.get('classSection') || ''),
-    })
     setBusy(true)
     try {
-      await api(`/past-papers?${params}`, {
+      await api('/past-papers', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/pdf',
-          'X-File-Name': encodeURIComponent(file.name),
-        },
-        body: file,
+        body: JSON.stringify({
+          title: String(formData.get('title') || ''),
+          subject: String(formData.get('subject') || ''),
+          academicYear: Number(formData.get('academicYear')),
+          classSection: String(formData.get('classSection') || ''),
+          totalCopies: Number(formData.get('totalCopies')),
+        }),
       })
       form.reset()
-      notify('Past paper uploaded.')
+      notify('Past-paper inventory added.')
       await loadPastPapers()
     } catch (error) {
       notify(error.message)
@@ -832,24 +825,44 @@ function App() {
     }
   }
 
-  async function downloadPastPaper(paper) {
+  async function checkoutPastPaper(event) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const formData = new FormData(form)
+    setBusy(true)
     try {
-      const token = sessionStorage.getItem('libraryflow-token')
-      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/past-papers/${paper.id}/download`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      await api('/past-paper-loans', {
+        method: 'POST',
+        body: JSON.stringify({
+          pastPaperId: Number(formData.get('pastPaperId')),
+          memberId: Number(formData.get('memberId')),
+          quantity: Number(formData.get('quantity')),
+          dueDate: String(formData.get('dueDate') || ''),
+        }),
       })
-      if (!response.ok) {
-        const result = await response.json().catch(() => ({}))
-        throw new Error(result.error || `Download failed (${response.status}).`)
-      }
-      const url = URL.createObjectURL(await response.blob())
-      const link = document.createElement('a')
-      link.href = url
-      link.download = paper.fileName
-      link.click()
-      URL.revokeObjectURL(url)
+      form.reset()
+      notify('Past paper checked out.')
+      await loadPastPapers()
     } catch (error) {
       notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function returnPastPaper(loan, quantity = loan.quantity - loan.returnedQuantity) {
+    setBusy(true)
+    try {
+      await api(`/past-paper-loans/${loan.id}/return`, {
+        method: 'POST',
+        body: JSON.stringify({ quantity }),
+      })
+      notify(`${quantity} ${quantity === 1 ? 'copy' : 'copies'} returned.`)
+      await loadPastPapers()
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -1012,13 +1025,13 @@ function App() {
   const selectedLoanQuantity = loanForm.items.reduce((total, item) => (
     total + (item.bookId ? Number(item.quantity) || 0 : 0)
   ), 0)
-  const selectedMemberLimit = selectedLoanMember?.memberType === 'Teacher' ? 300 : 2
+  const selectedMemberLimit = selectedLoanMember?.memberType === 'Teacher' ? 300 : 1
   const selectedMemberRemaining = selectedLoanMember
     ? selectedMemberLimit - Number(selectedLoanMember.checkoutActiveLoans ?? selectedLoanMember.activeLoans ?? 0)
     : 1
   const canAddLoanItem = (selectedLoanMember?.memberType === 'Teacher' || selectedLoanMember?.memberType === 'Student')
     && selectedMemberRemaining > selectedLoanQuantity
-    && loanForm.items.length < (selectedLoanMember.memberType === 'Teacher' ? 300 : 2)
+    && loanForm.items.length < (selectedLoanMember.memberType === 'Teacher' ? 300 : 1)
     && loanForm.items.length < availableBooks.length
     && availableBooks.some((book) => !loanForm.items.some((item) => item.bookId === String(book.id)))
 
@@ -1139,8 +1152,11 @@ function App() {
               setSearch={setSearch}
               busy={busy}
               canManage={canManageLibraryData}
-              onUpload={uploadPastPaper}
-              onDownload={downloadPastPaper}
+              members={members}
+              paperLoans={pastPaperLoans}
+              onAdd={addPastPaper}
+              onCheckout={checkoutPastPaper}
+              onReturn={returnPastPaper}
               onDelete={deletePastPaper}
             />
           )}
@@ -1346,7 +1362,7 @@ function App() {
       {modal?.type === 'loan' && (
         <Modal title="Check out a book" subtitle="Choose a member and an available title." onClose={() => setModal(null)}>
           {availableBooks.length === 0 || members.every((member) => {
-            const limit = member.memberType === 'Teacher' ? 300 : 2
+            const limit = member.memberType === 'Teacher' ? 300 : 1
             return member.status !== 'Active'
               || (!member.overdueBlocked && Number(member.checkoutActiveLoans ?? member.activeLoans ?? 0) >= limit)
           }) ? (
@@ -1365,7 +1381,7 @@ function App() {
                   onChange={(event) => {
                     const memberSearch = event.target.value
                     const member = members.find((item) => {
-                      const limit = item.memberType === 'Teacher' ? 300 : 2
+                      const limit = item.memberType === 'Teacher' ? 300 : 1
                       return item.status === 'Active'
                         && checkoutMemberLabel(item) === memberSearch
                         && (item.overdueBlocked || Number(item.checkoutActiveLoans ?? item.activeLoans ?? 0) < limit)
@@ -1375,14 +1391,14 @@ function App() {
                       memberId: member ? String(member.id) : '',
                       memberSearch,
                       items: member?.memberType === 'Student'
-                        ? loanForm.items.slice(0, 2).map((item) => ({ ...item, quantity: '1' }))
+                        ? loanForm.items.slice(0, 1).map((item) => ({ ...item, quantity: '1' }))
                         : loanForm.items,
                     })
                   }}
                 />
                 <datalist id="checkout-members">
                   {members.filter((member) => {
-                    const limit = member.memberType === 'Teacher' ? 300 : 2
+                    const limit = member.memberType === 'Teacher' ? 300 : 1
                     return member.status === 'Active'
                       && (member.overdueBlocked || Number(member.checkoutActiveLoans ?? member.activeLoans ?? 0) < limit)
                   }).map((member) => {
@@ -1408,7 +1424,7 @@ function App() {
                         Borrowing blocked due to a previous overdue book. Unblock this student from Students &amp; teachers before checkout.
                       </p>
                     ) : <p className="mt-1 text-[10px] text-[#748078]">
-                      {selectedLoanMember.memberType === 'Teacher' ? `Teacher limit: ${selectedLoanMember.activeLoans || 0} of 300 active copies; ${selectedMemberRemaining} more may be checked out across different titles.` : `Student limit: ${selectedLoanMember.checkoutActiveLoans || selectedLoanMember.activeLoans || 0} of 2 active books; ${selectedMemberRemaining} more may be checked out.`}
+                      {selectedLoanMember.memberType === 'Teacher' ? `Teacher limit: ${selectedLoanMember.activeLoans || 0} of 300 active copies; ${selectedMemberRemaining} more may be checked out across different titles.` : `Student limit: ${selectedLoanMember.checkoutActiveLoans || selectedLoanMember.activeLoans || 0} of 1 active book; ${selectedMemberRemaining} more may be checked out.`}
                     </p>}
                   </div>
                 </div>
@@ -2030,24 +2046,44 @@ function SearchBox({ value, onChange, placeholder }) {
   return <label className="flex min-w-0 items-center gap-2.5 rounded-xl border border-[#e8ece6] bg-white px-3.5 py-2.5 focus-within:border-[#9db9a0] sm:w-[260px]"><Search size={15} className="shrink-0 text-[#98a39a]" /><input className="min-w-0 flex-1 border-0 bg-transparent text-[11px] outline-none placeholder:text-[#a0aaa2]" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>
 }
 
-function PastPapers({ papers, search, setSearch, busy, canManage, onUpload, onDownload, onDelete }) {
+function PastPapers({ papers, members, paperLoans, search, setSearch, busy, canManage, onAdd, onCheckout, onReturn, onDelete }) {
+  const [selectedMemberId, setSelectedMemberId] = useState('')
+  const [selectedPaperId, setSelectedPaperId] = useState('')
   const term = search.trim().toLowerCase()
   const filteredPapers = papers.filter((paper) => (
-    [paper.title, paper.subject, paper.classSection, paper.academicYear, paper.fileName]
+    [paper.title, paper.subject, paper.classSection, paper.academicYear]
       .join(' ')
       .toLowerCase()
       .includes(term)
   ))
+  const activePaperCopies = paperLoans.reduce((counts, loan) => {
+    counts[loan.memberId] = (counts[loan.memberId] || 0) + loan.quantity - loan.returnedQuantity
+    return counts
+  }, {})
+  const eligibleMembers = members.filter((member) => (
+    member.status === 'Active'
+    && !(member.memberType === 'Student' && member.overdueBlocked)
+    && (member.memberType === 'Teacher'
+      ? (activePaperCopies[member.id] || 0) < 300
+      : (activePaperCopies[member.id] || 0) < 2)
+  ))
+  const selectedMember = eligibleMembers.find((member) => String(member.id) === selectedMemberId)
+  const selectedPaper = papers.find((paper) => String(paper.id) === selectedPaperId)
+  const memberPaperLimit = selectedMember?.memberType === 'Teacher' ? 300 : 2
+  const checkoutQuantityLimit = Math.max(1, Math.min(
+    Number(selectedPaper?.availableCopies || 1),
+    memberPaperLimit - (activePaperCopies[selectedMember?.id] || 0),
+  ))
   return (
     <>
-      <PageHeading eyebrow="Exam resources, separate from the book catalog" title="Past papers" description={`${filteredPapers.length} of ${papers.length} paper${papers.length === 1 ? '' : 's'} in the library`}>
+      <PageHeading eyebrow="Borrowable exam resources, separate from books" title="Past papers" description={`${filteredPapers.length} of ${papers.length} paper title${papers.length === 1 ? '' : 's'} · student limit: 2 copies`}>
         <SearchBox value={search} onChange={setSearch} placeholder="Search title, subject, class or year…" />
       </PageHeading>
       {canManage && (
-        <form onSubmit={onUpload} className="mb-5 rounded-2xl border border-[#e9ede7] bg-white p-5">
+        <form onSubmit={onAdd} className="mb-5 rounded-2xl border border-[#e9ede7] bg-white p-5">
           <div className="mb-4">
-            <h3 className="text-sm font-bold">Upload a past paper</h3>
-            <p className="mt-1 text-[10px] text-[#929d94]">Add a PDF with its subject and year. Past papers are stored separately and do not count as borrowable books.</p>
+            <h3 className="text-sm font-bold">Add past-paper copies</h3>
+            <p className="mt-1 text-[10px] text-[#929d94]">Record physical paper copies for checkout; no files need to be uploaded.</p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <Field label="Paper title">
@@ -2057,34 +2093,87 @@ function PastPapers({ papers, search, setSearch, busy, canManage, onUpload, onDo
               <input name="subject" required maxLength={100} className="w-full rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px]" placeholder="e.g. Mathematics" />
             </Field>
             <Field label="Year">
-              <input name="year" required type="number" min="1900" max="2100" defaultValue={currentAcademicYear} className="w-full rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px]" />
+              <input name="academicYear" required type="number" min="1900" max="2100" defaultValue={currentAcademicYear} className="w-full rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px]" />
             </Field>
             <Field label="Class (optional)">
               <input name="classSection" maxLength={40} className="w-full rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px]" placeholder="e.g. S6" />
             </Field>
-            <Field label="PDF file (15 MB max)">
-              <input name="file" required type="file" accept=".pdf,application/pdf" className="block w-full rounded-lg border border-[#e8ece6] bg-white px-3 py-2 text-[10px] file:mr-2 file:rounded-md file:border-0 file:bg-[#edf4ed] file:px-2 file:py-1.5 file:text-[10px] file:font-bold file:text-[#52745b]" />
+            <Field label="Number of copies">
+              <input name="totalCopies" required type="number" min="1" max="300" defaultValue="1" className="w-full rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px]" />
             </Field>
           </div>
           <div className="mt-4 flex justify-end">
-            <ActionButton type="submit" icon={Upload} disabled={busy}>Upload past paper</ActionButton>
+            <ActionButton type="submit" disabled={busy}>Add inventory</ActionButton>
+          </div>
+        </form>
+      )}
+      {canManage && (
+        <form onSubmit={onCheckout} className="mb-5 rounded-2xl border border-[#e9ede7] bg-white p-5">
+          <div className="mb-4">
+            <h3 className="text-sm font-bold">Check out past papers</h3>
+            <p className="mt-1 text-[10px] text-[#929d94]">Students may have up to 2 past-paper copies at a time, separate from their 1-book limit.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Field label="Member">
+              <select name="memberId" required value={selectedMemberId} onChange={(event) => setSelectedMemberId(event.target.value)} className="w-full rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px]">
+                <option value="">Select student or teacher</option>
+                {eligibleMembers.map((member) => <option key={member.id} value={member.id}>{member.name} · {member.memberType} · {activePaperCopies[member.id] || 0}/{member.memberType === 'Teacher' ? 300 : 2} papers</option>)}
+              </select>
+            </Field>
+            <Field label="Past paper">
+              <select name="pastPaperId" required value={selectedPaperId} onChange={(event) => setSelectedPaperId(event.target.value)} className="w-full rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px]">
+                <option value="">Select available paper</option>
+                {papers.filter((paper) => paper.availableCopies > 0).map((paper) => <option key={paper.id} value={paper.id}>{paper.title} · {paper.subject} · {paper.availableCopies} available</option>)}
+              </select>
+            </Field>
+            <Field label="Quantity">
+              <input name="quantity" required type="number" min="1" max={checkoutQuantityLimit} defaultValue="1" className="w-full rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px]" />
+            </Field>
+            <Field label="Due date">
+              <input name="dueDate" required type="date" min={today()} defaultValue={dateInDays(14)} className="w-full rounded-lg border border-[#e8ece6] bg-white px-3 py-2.5 text-[11px]" />
+            </Field>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <ActionButton type="submit" disabled={busy || !eligibleMembers.length || !papers.some((paper) => paper.availableCopies > 0)}>Check out</ActionButton>
           </div>
         </form>
       )}
       <section className="overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left">
-            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Past paper</th><th className="px-4 py-3.5">Subject</th><th className="px-4 py-3.5">Year</th><th className="px-4 py-3.5">Class</th><th className="px-4 py-3.5">Uploaded</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
+            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Past paper</th><th className="px-4 py-3.5">Subject</th><th className="px-4 py-3.5">Year</th><th className="px-4 py-3.5">Class</th><th className="px-4 py-3.5">Available / total</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-[#f0f2ee]">
               {filteredPapers.map((paper) => <tr key={paper.id} className="transition hover:bg-[#fcfdfa]">
-                <td className="px-5 py-3"><div className="flex items-center gap-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#f8eee9] text-[#a66c53]"><FileText size={16} /></span><div><p className="max-w-[280px] truncate text-[11px] font-bold">{paper.title}</p><p className="mt-1 text-[10px] text-[#8b968d]">{paper.fileName} · {(paper.fileSize / (1024 * 1024)).toFixed(1)} MB</p></div></div></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#f8eee9] text-[#a66c53]"><FileText size={16} /></span><div><p className="max-w-[280px] truncate text-[11px] font-bold">{paper.title}</p><p className="mt-1 text-[10px] text-[#8b968d]">{paper.addedAt ? `Added ${paper.addedAt}` : 'Physical copies'}</p></div></div></td>
                 <td className="px-4 py-3 text-[10px] text-[#748078]">{paper.subject}</td>
                 <td className="px-4 py-3 text-[10px] text-[#748078]">{paper.academicYear}</td>
                 <td className="px-4 py-3 text-[10px] text-[#748078]">{paper.classSection || '—'}</td>
-                <td className="px-4 py-3 text-[10px] text-[#748078]">{paper.uploadedAt}</td>
-                <td className="px-5 py-3 text-right"><button disabled={busy} onClick={() => onDownload(paper)} className="rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-[#58745e] hover:bg-[#edf4ed] disabled:opacity-50">Download</button>{canManage && <button disabled={busy} onClick={() => onDelete(paper)} className="ml-1 rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button>}</td>
+                <td className="px-4 py-3 text-[10px] font-semibold text-[#748078]">{paper.availableCopies} / {paper.totalCopies}</td>
+                <td className="px-5 py-3 text-right">{canManage && <button disabled={busy} onClick={() => onDelete(paper)} className="rounded-lg px-2 py-1.5 text-[10px] font-semibold text-[#a57665] hover:bg-[#f9eee9] disabled:opacity-50">Delete</button>}</td>
               </tr>)}
-              {filteredPapers.length === 0 && <EmptyRow colSpan={6} message={search.trim() ? 'No past papers match this search.' : 'No past papers uploaded yet. Add PDFs here when they are ready.'} />}
+              {filteredPapers.length === 0 && <EmptyRow colSpan={6} message={search.trim() ? 'No past papers match this search.' : 'No past papers in inventory yet.'} />}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className="mt-5 overflow-hidden rounded-2xl border border-[#e9ede7] bg-white">
+        <div className="border-b border-[#edf0eb] px-5 py-4"><h3 className="text-sm font-bold">Past papers checked out</h3><p className="mt-1 text-[10px] text-[#929d94]">{paperLoans.length} active checkout{paperLoans.length === 1 ? '' : 's'}</p></div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-left">
+            <thead><tr className="border-b border-[#edf0eb] bg-[#fbfcfa] text-[9px] font-bold uppercase tracking-[.12em] text-[#929d94]"><th className="px-5 py-3.5">Paper</th><th className="px-4 py-3.5">Borrower</th><th className="px-4 py-3.5">Checked out</th><th className="px-4 py-3.5">Due</th><th className="px-4 py-3.5">Outstanding</th><th className="px-5 py-3.5 text-right">Actions</th></tr></thead>
+            <tbody className="divide-y divide-[#f0f2ee]">
+              {paperLoans.map((loan) => {
+                const outstanding = loan.quantity - loan.returnedQuantity
+                return <tr key={loan.id}>
+                  <td className="px-5 py-3"><p className="text-[11px] font-bold">{loan.paperTitle}</p><p className="mt-1 text-[10px] text-[#8b968d]">{loan.subject} · {loan.academicYear}</p></td>
+                  <td className="px-4 py-3 text-[10px] text-[#748078]">{loan.memberName} · {loan.memberType}{loan.classSection ? ` · ${loan.classSection}` : ''}</td>
+                  <td className="px-4 py-3 text-[10px] text-[#748078]">{loan.issuedAt}</td>
+                  <td className={`px-4 py-3 text-[10px] ${loan.dueDate < today() ? 'font-bold text-[#ad5947]' : 'text-[#748078]'}`}>{loan.dueDate}</td>
+                  <td className="px-4 py-3 text-[10px] text-[#748078]">{outstanding}</td>
+                  <td className="px-5 py-3 text-right">{canManage && <button disabled={busy} onClick={() => onReturn(loan, outstanding)} className="rounded-lg bg-[#edf4ed] px-2.5 py-1.5 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Return all</button>}</td>
+                </tr>
+              })}
+              {paperLoans.length === 0 && <EmptyRow colSpan={6} message="No past papers are currently checked out." />}
             </tbody>
           </table>
         </div>

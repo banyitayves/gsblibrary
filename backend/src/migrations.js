@@ -37,14 +37,55 @@ export async function ensurePastPapersTable(connection) {
       subject VARCHAR(100) NOT NULL,
       academic_year SMALLINT UNSIGNED NOT NULL,
       class_section VARCHAR(40) NULL,
-      file_name VARCHAR(255) NOT NULL,
-      file_size INT UNSIGNED NOT NULL,
-      file_data MEDIUMBLOB NOT NULL,
+      total_copies INT UNSIGNED NOT NULL DEFAULT 1,
+      available_copies INT UNSIGNED NOT NULL DEFAULT 1,
       uploaded_by VARCHAR(120) NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_past_papers_subject_year (subject, academic_year),
       INDEX idx_past_papers_class (class_section),
       INDEX idx_past_papers_title (title)
+    ) ENGINE=InnoDB`,
+  )
+  const [paperColumns] = await connection.execute(
+    `SELECT COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'past_papers'`,
+  )
+  const columns = new Map(paperColumns.map((column) => [column.COLUMN_NAME, column.IS_NULLABLE]))
+  const legacyUploadRecords = columns.has('file_name') && columns.has('file_data')
+  const inventoryNeedsMigration = !columns.has('total_copies') || !columns.has('available_copies')
+  for (const [name, definition] of [
+    ['total_copies', 'INT UNSIGNED NOT NULL DEFAULT 1'],
+    ['available_copies', 'INT UNSIGNED NOT NULL DEFAULT 1'],
+  ]) {
+    if (!columns.has(name)) await connection.query(`ALTER TABLE past_papers ADD COLUMN ${name} ${definition}`)
+  }
+  if (legacyUploadRecords && inventoryNeedsMigration) {
+    await connection.query('UPDATE past_papers SET total_copies = 0, available_copies = 0')
+  }
+  for (const [name, definition] of [
+    ['file_name', 'VARCHAR(255) NULL'],
+    ['file_size', 'INT UNSIGNED NULL'],
+    ['file_data', 'MEDIUMBLOB NULL'],
+  ]) {
+    if (columns.has(name) && columns.get(name) === 'NO') {
+      await connection.query(`ALTER TABLE past_papers MODIFY COLUMN ${name} ${definition}`)
+    }
+  }
+  await connection.query(
+    `CREATE TABLE IF NOT EXISTS past_paper_loans (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      past_paper_id BIGINT UNSIGNED NOT NULL,
+      member_id BIGINT UNSIGNED NOT NULL,
+      issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      due_date DATE NOT NULL,
+      quantity INT UNSIGNED NOT NULL DEFAULT 1,
+      returned_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+      returned_at TIMESTAMP NULL DEFAULT NULL,
+      INDEX idx_past_paper_loans_due_date (due_date),
+      INDEX idx_past_paper_loans_member (member_id),
+      INDEX idx_past_paper_loans_paper (past_paper_id),
+      CONSTRAINT fk_past_paper_loans_paper FOREIGN KEY (past_paper_id) REFERENCES past_papers(id) ON DELETE RESTRICT,
+      CONSTRAINT fk_past_paper_loans_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE RESTRICT
     ) ENGINE=InnoDB`,
   )
 }
