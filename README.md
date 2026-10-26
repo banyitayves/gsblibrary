@@ -41,6 +41,12 @@ The bootstrap uses the installed MySQL 8.4 Server binaries, binds the database o
 
 To install MySQL Community Server separately, use the [official MySQL Installer](https://dev.mysql.com/downloads/installer/) or [Community Server downloads](https://dev.mysql.com/downloads/mysql/). If you have an existing MySQL server or data, **do not run `db:bootstrap`**: configure `.env` using [.env.example](./.env.example), create `library_management` and a least-privilege app account in MySQL Workbench, then run `npm.cmd run db:setup`.
 
+## Database backups
+
+Run `npm.cmd run db:backup` from the project root or double-click `run_database_backup.bat` to create a MySQL dump manually. Backups are saved to `%LOCALAPPDATA%\LibraryFlow\Backups` by default, and files older than 30 days are removed only after a successful backup. The backup log is `backup.log` in that folder.
+
+To install automatic backups, run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-database-backups.ps1` from the project root. This registers a daily task at 2:00 AM and a weekly task on Sunday at 3:00 AM for the current Windows user; you must be signed in when they run. MySQL is started temporarily for local backups when needed, then shut down cleanly. The tasks use the local MySQL credentials from `.env`; do not share backup files because they contain library and member data.
+
 ## Deploy to Vercel
 
 This repository deploys as a single Vercel project containing two services, so choose **Import multi-service project**. The included `vercel.json` defines:

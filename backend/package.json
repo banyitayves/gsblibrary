@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "db:bootstrap": "node src/bootstrapMysql.js",
     "db:setup": "node src/setupDatabase.js",
+    "db:backup": "node src/backupDatabase.js",
     "db:migrate:directory": "node src/migrateDirectory.js",
     "db:update-librarian-login": "node src/updateLibrarianLogin.js"
   },
