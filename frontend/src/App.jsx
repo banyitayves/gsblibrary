@@ -621,6 +621,10 @@ function App() {
     setModal({ type: 'loanAction', action, loan, member })
   }
 
+  function openDueDateExtension(loan) {
+    setModal({ type: 'extendDueDate', loan, dueDate: shiftIsoDate(loan.dueDate, 1) })
+  }
+
   async function recoverLoan(event) {
     event.preventDefault()
     const { loan } = modal
@@ -692,6 +696,29 @@ function App() {
         totalMissing: result.missedQuantity,
       })
       notify(`${returnedQuantity} returned, ${missedQuantity} missing; ${result.outstandingQuantity} still outstanding for “${loan.bookTitle}”.`)
+      await loadData()
+    } catch (error) {
+      notify(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function saveDueDateExtension(event) {
+    event.preventDefault()
+    const { loan, dueDate } = modal
+    if (!dueDate || dueDate <= loan.dueDate) {
+      notify('Choose a due date later than the current due date.')
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await api(`/loans/${loan.id}/due-date`, {
+        method: 'PATCH',
+        body: JSON.stringify({ dueDate }),
+      })
+      setModal(null)
+      notify(`Due date extended to ${result.dueDate}.`)
       await loadData()
     } catch (error) {
       notify(error.message)
@@ -1208,6 +1235,7 @@ function App() {
               classFilter={loanClassFilter}
               setClassFilter={setLoanClassFilter}
               onIssue={openLoanForm}
+              onExtendDueDate={openDueDateExtension}
               onReturn={(loan) => openLoanAction('return', loan)}
               onMissed={(loan) => openLoanAction('missed', loan)}
               onRecover={(loan) => {
@@ -1224,6 +1252,7 @@ function App() {
                 setBorrowerSearch('')
                 setModal({ type: 'borrowerMessages' })
               }}
+              canManage={canManageLibraryData}
               busy={busy}
             />
           )}
@@ -1519,6 +1548,32 @@ function App() {
               {Math.max(0, Number(modal.loan.outstandingQuantity) - (Number(loanActionQuantities.returned) || 0) - (Number(loanActionQuantities.missed) || 0))} copies will remain outstanding after this update.
             </p>
             <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Save return details" />
+          </form>
+        </Modal>
+      )}
+
+      {modal?.type === 'extendDueDate' && (
+        <Modal
+          title="Extend teacher loan due date"
+          subtitle="Choose a new date later than the current due date."
+          onClose={() => setModal(null)}
+        >
+          <form className="space-y-4" onSubmit={saveDueDateExtension}>
+            <div className="rounded-xl bg-[#f7f8f5] p-4 text-[11px] leading-relaxed text-[#748078]">
+              <p className="font-bold text-[#46584b]">{modal.loan.bookTitle}</p>
+              <p className="mt-1">{modal.loan.memberName} · Current due date: {modal.loan.dueDate}</p>
+            </div>
+            <Field label="New due date">
+              <input
+                autoFocus
+                required
+                type="date"
+                min={shiftIsoDate(modal.loan.dueDate, 1)}
+                value={modal.dueDate}
+                onChange={(event) => setModal((current) => ({ ...current, dueDate: event.target.value }))}
+              />
+            </Field>
+            <ModalActions onCancel={() => setModal(null)} busy={busy} submitLabel="Extend due date" />
           </form>
         </Modal>
       )}
@@ -2658,7 +2713,7 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
   )
 }
 
-function Loans({ loans, search, setSearch, filter, setFilter, memberTypeFilter, setMemberTypeFilter, classFilter, setClassFilter, onIssue, onReturn, onMissed, onRecover, reminders, onOpenReminders, smsReminders, onOpenSmsReminders, activeBorrowers, onOpenBorrowerMessages, busy }) {
+function Loans({ loans, search, setSearch, filter, setFilter, memberTypeFilter, setMemberTypeFilter, classFilter, setClassFilter, onIssue, onExtendDueDate, onReturn, onMissed, onRecover, reminders, onOpenReminders, smsReminders, onOpenSmsReminders, activeBorrowers, onOpenBorrowerMessages, canManage, busy }) {
   const emptyMessage = filter === 'All' && memberTypeFilter === 'All' && classFilter === 'All' && !search.trim()
     ? 'No loans yet. Check out a book to get started.'
     : `No ${memberTypeFilter === 'All' ? '' : `${memberTypeFilter.toLowerCase()} `}${classFilter === 'All' ? '' : `${classFilter} `}${filter === 'All' ? '' : `${filter.toLowerCase()} `}loans match these filters.`
@@ -2737,6 +2792,7 @@ function Loans({ loans, search, setSearch, filter, setFilter, memberTypeFilter, 
                     </td>
                     <td className="space-x-1 px-5 py-4 text-right">
                       {active && <>
+                        {canManage && loan.memberType === 'Teacher' && <button disabled={busy} onClick={() => onExtendDueDate(loan)} className="rounded-lg bg-[#edf1f8] px-3 py-2 text-[10px] font-bold text-[#52688b] hover:bg-[#e3eaf5] disabled:opacity-50">Extend due date</button>}
                         <button disabled={busy} onClick={() => onMissed(loan)} className="rounded-lg bg-[#f8e8e4] px-3 py-2 text-[10px] font-bold text-[#a34d37] hover:bg-[#f2d9d2] disabled:opacity-50">Mark missed</button>
                         <button disabled={busy} onClick={() => onReturn(loan)} className="rounded-lg bg-[#edf4ed] px-3 py-2 text-[10px] font-bold text-[#52745b] hover:bg-[#e3eee4] disabled:opacity-50">Mark returned</button>
                       </>}

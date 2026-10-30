@@ -1284,6 +1284,59 @@ app.get('/api/loans', ...staff, asyncRoute(async (req, res) => {
   })))
 }))
 
+app.patch('/api/loans/:id/due-date', ...canManage, asyncRoute(async (req, res) => {
+  const loanId = Number(req.params.id)
+  const dueDate = String(req.body?.dueDate || '')
+  if (!Number.isSafeInteger(loanId) || loanId < 1 || !isValidIsoDate(dueDate)) {
+    return res.status(400).json({ error: 'Choose a valid due date in YYYY-MM-DD format.' })
+  }
+
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [[loan]] = await connection.execute(
+      `SELECT l.id, DATE_FORMAT(l.due_date, '%Y-%m-%d') AS dueDate, l.quantity, l.returned_quantity AS returnedQuantity,
+       l.missed_quantity AS missedQuantity, m.member_type AS memberType,
+       m.name AS memberName, b.title AS bookTitle
+       FROM loans l JOIN members m ON m.id = l.member_id
+       JOIN books b ON b.id = l.book_id WHERE l.id = ? FOR UPDATE`,
+      [loanId],
+    )
+    if (!loan) {
+      await connection.rollback()
+      return res.status(404).json({ error: 'Loan not found.' })
+    }
+    if (loan.memberType !== 'Teacher') {
+      await connection.rollback()
+      return res.status(403).json({ error: 'Due dates can only be extended for teacher loans.' })
+    }
+    if (Number(loan.quantity) <= Number(loan.returnedQuantity) + Number(loan.missedQuantity)) {
+      await connection.rollback()
+      return res.status(409).json({ error: 'The due date cannot be changed because this loan has no outstanding copies.' })
+    }
+    const currentDueDate = loan.dueDate
+    if (dueDate <= currentDueDate) {
+      await connection.rollback()
+      return res.status(400).json({ error: 'The new due date must be later than the current due date.' })
+    }
+
+    await connection.execute('UPDATE loans SET due_date = ? WHERE id = ?', [dueDate, loan.id])
+    await audit(
+      connection,
+      req.user.name,
+      'Teacher loan due date extended',
+      `"${loan.bookTitle}" borrowed by ${loan.memberName} from ${currentDueDate} to ${dueDate}`,
+    )
+    await connection.commit()
+    res.json({ id: Number(loan.id), dueDate })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}))
+
 app.get('/api/reports', ...staff, asyncRoute(async (req, res) => {
   const dateColumn = req.query.status === 'Returned'
     ? 'l.returned_at'

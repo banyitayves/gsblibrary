@@ -112,7 +112,7 @@ This changes the single librarian account's username and bcrypt password without
 - CSV import/export for students and teachers, duplicate reporting, and optional email/phone contact fields
 - Optional single email address per member and manually prepared checkout and return summaries by email or WhatsApp
 - Name, membership-number, class, and member-type search and filters
-- Book checkout with an optional physical copy/accession code, multi-title quantity checkout for teachers (up to 300 active copies), a one-book student limit, returned/missing copy reconciliation, and overdue tracking
+- Book checkout with an optional physical copy/accession code, multi-title quantity checkout for teachers (up to 300 active copies), a one-book student limit, returned/missing copy reconciliation, and overdue tracking; active teacher loan due dates can be extended by Administrators and Librarians
 - A separate physical past-paper inventory with copy counts, student checkouts (up to two active copies), returns, and subject/year/class search
 - Manual Gmail and WhatsApp return reminders for borrowers whose books are due today or overdue
 - Manually select up to 10 borrowers with outstanding books and prepare individual Gmail or WhatsApp messages listing all their active titles, grades, quantities, and due dates
