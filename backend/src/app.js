@@ -44,7 +44,8 @@ async function latestOverdueLoanId(connection, memberId) {
   const [[row]] = await connection.execute(
     `SELECT COALESCE(MAX(id), 0) AS latestOverdueLoanId
      FROM loans
-     WHERE member_id = ? AND due_date < CURRENT_DATE()`,
+     WHERE member_id = ? AND due_date < CURRENT_DATE()
+       AND quantity > returned_quantity + missed_quantity`,
     [memberId],
   )
   return row.latestOverdueLoanId
@@ -983,6 +984,7 @@ app.get('/api/members', ...staff, asyncRoute(async (req, res) => {
        (m.member_type = 'Student' AND COALESCE((
          SELECT MAX(l.id) FROM loans l
          WHERE l.member_id = m.id AND l.due_date < CURRENT_DATE()
+           AND l.quantity > l.returned_quantity + l.missed_quantity
        ), 0) > COALESCE(m.overdue_unblocked_through_loan_id, 0)) AS overdueBlocked
      FROM members m
      WHERE m.name LIKE ? OR m.email LIKE ? OR m.phone LIKE ? OR m.membership_number LIKE ? OR m.class_section LIKE ?

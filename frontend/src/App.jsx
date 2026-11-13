@@ -2607,10 +2607,10 @@ function LibraryReportLetter({ books, notify, onBack }) {
 function LibraryAttendance({ members, books, visits, summary, date, setDate, form, setForm, attendanceSearch, setAttendanceSearch, busy, onRecord, onExport }) {
   const activeMembers = members.filter((member) => (
     member.status === 'Active'
-    && !(member.memberType === 'Student' && Number(member.overdueLoanCount) > 0)
+    && !(member.memberType === 'Student' && member.overdueBlocked)
   ))
   const blockedStudents = members.filter((member) => (
-    member.memberType === 'Student' && Number(member.overdueLoanCount) > 0
+    member.memberType === 'Student' && member.overdueBlocked
   ))
   const memberOptions = activeMembers.map((member) => ({
     id: String(member.id),
@@ -2653,7 +2653,7 @@ function LibraryAttendance({ members, books, visits, summary, date, setDate, for
         ].map(([label, value]) => <article key={label} className="rounded-2xl border border-[#e9ede7] bg-white p-4"><p className="text-[10px] font-semibold text-[#7c887f]">{label}</p><p className="mt-2 text-2xl font-bold">{typeof value === 'number' ? value.toLocaleString() : value}</p></article>)}
       </section>
       <section className="mb-5 rounded-2xl border border-[#e9ede7] bg-white p-5">
-        <div className="mb-4"><h3 className="text-sm font-bold">Check in a library visitor</h3><p className="mt-1 text-[10px] text-[#929d94]">This records attendance and reading activity only; it does not check a book out. Students with overdue books cannot be checked in{blockedStudents.length ? ` (${blockedStudents.length} currently have overdue books)` : ''}.</p></div>
+        <div className="mb-4"><h3 className="text-sm font-bold">Check in a library visitor</h3><p className="mt-1 text-[10px] text-[#929d94]">This records attendance and reading activity only; it does not check a book out. Students currently blocked for overdue books cannot be checked in{blockedStudents.length ? ` (${blockedStudents.length} currently blocked)` : ''}.</p></div>
         <form className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[1.3fr_1.3fr_1fr_auto]" onSubmit={onRecord}>
           <Field label="Student or teacher">
             <input required list="attendance-members" autoComplete="off" placeholder="Search student or teacher…" value={form.memberSearch} onChange={(event) => updateSearch('memberSearch', memberOptions, event.target.value)} />
