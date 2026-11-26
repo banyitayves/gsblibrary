@@ -246,6 +246,7 @@ def issue_book(payload: dict):
     member = payload.get("member")
     book_id = payload.get("bookId")
     due_date = payload.get("dueDate")
+    child_name = str(payload.get("childName") or "").strip()
     if not member or not book_id or not due_date:
         raise HTTPException(status_code=400, detail="Member, book ID, and due date are required.")
 
@@ -261,6 +262,8 @@ def issue_book(payload: dict):
         "dueDate": due_date,
         "status": "Borrowed",
     }
+    if child_name:
+        due_entry["childName"] = child_name
     loans.append(due_entry)
     return {"message": "Book issued successfully", "loan": due_entry}
 

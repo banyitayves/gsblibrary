@@ -320,7 +320,7 @@ function App() {
   const [roles, setRoles] = useState(defaultRoles)
   const [currentUser, setCurrentUser] = useState(null)
   const [loginForm, setLoginForm] = useState({ username: 'admin', password: 'admin123' })
-  const [loanForm, setLoanForm] = useState({ member: 'Maya Clark', bookId: 'BK-1024', dueDate: '2026-10-20' })
+  const [loanForm, setLoanForm] = useState({ member: 'Maya Clark', childName: '', bookId: 'BK-1024', dueDate: '2026-10-20' })
   const [readingForm, setReadingForm] = useState({ student: 'Maya Clark', bookId: 'BK-5120', minutes: '60', date: '2026-10-14' })
   const [bookForm, setBookForm] = useState(emptyBookForm)
 
@@ -446,6 +446,7 @@ function App() {
         id: `L-${Date.now()}`,
         bookId: selectedBook.id,
         member: loanForm.member,
+        ...(loanForm.childName.trim() ? { childName: loanForm.childName.trim() } : {}),
         dueDate: loanForm.dueDate,
         status: 'Borrowed',
       },
@@ -456,7 +457,7 @@ function App() {
         time: new Date().toLocaleString('sv-SE', { hour12: false }),
         user: currentUser?.name || 'System',
         action: 'Book issued',
-        details: `${selectedBook.title} lent to ${loanForm.member}`,
+        details: `${selectedBook.title} lent to ${loanForm.member}${loanForm.childName.trim() ? ` for ${loanForm.childName.trim()}` : ''}`,
       },
       ...currentLogs,
     ])
@@ -951,7 +952,14 @@ function App() {
                 type="text"
                 value={loanForm.member}
                 onChange={(event) => setLoanForm({ ...loanForm, member: event.target.value })}
-                placeholder="Borrower name"
+                placeholder="Borrower or parent/guardian name"
+                required
+              />
+              <input
+                type="text"
+                value={loanForm.childName}
+                onChange={(event) => setLoanForm({ ...loanForm, childName: event.target.value })}
+                placeholder="Child's name (optional)"
               />
               <input
                 type="date"
@@ -966,6 +974,7 @@ function App() {
                 <div key={loan.id} className="mini-row">
                   <div>
                     <strong>{loan.member}</strong>
+                    {loan.childName && <small>For: {loan.childName}</small>}
                     <small>{loan.bookId}</small>
                   </div>
                   <div>

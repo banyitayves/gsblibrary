@@ -44,5 +44,44 @@ class BookPhysicalCodeTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 409)
 
 
+class IssueBookTests(unittest.TestCase):
+    def setUp(self):
+        self.original_loans = app.loans[:]
+        app.loans.clear()
+        self.original_books = app.books[:]
+        app.books.clear()
+        app.books.append({
+            "id": "BK-TEST",
+            "title": "Test Book",
+            "status": "Available",
+        })
+
+    def tearDown(self):
+        app.loans.clear()
+        app.loans.extend(self.original_loans)
+        app.books.clear()
+        app.books.extend(self.original_books)
+
+    def test_parent_can_borrow_for_child_and_child_is_recorded(self):
+        result = app.issue_book({
+            "member": "Jordan Lee",
+            "childName": "Casey Lee",
+            "bookId": "BK-TEST",
+            "dueDate": "2026-12-01",
+        })
+
+        self.assertEqual(result["loan"]["member"], "Jordan Lee")
+        self.assertEqual(result["loan"]["childName"], "Casey Lee")
+
+    def test_child_name_is_optional_for_regular_loans(self):
+        result = app.issue_book({
+            "member": "Jordan Lee",
+            "bookId": "BK-TEST",
+            "dueDate": "2026-12-01",
+        })
+
+        self.assertNotIn("childName", result["loan"])
+
+
 if __name__ == "__main__":
     unittest.main()
